@@ -52,6 +52,11 @@ function frame(now) {
 
   // Render
   drawBoard(ctx, board$, game);
+  // Apply board shake as a CSS transform on the canvas. The wrap's
+  // background is the same color as the canvas, so any sliver of
+  // wrap revealed by the offset is invisible.
+  const shake = game.shakeOffset();
+  board$.style.transform = `translate(${shake.x.toFixed(2)}px, ${shake.y.toFixed(2)}px)`;
   drawMini(hold$, holdCtx, game.hold);
   for (let i = 0; i < nextCanvases.length; i++) {
     drawMini(nextCanvases[i], nextCtxs[i], game.queue[i]);

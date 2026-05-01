@@ -90,8 +90,8 @@ export function drawBlock(ctx, px, py, size, color, ghost = false) {
   const cx = x + w * 0.5;
   const cy = y + h * 0.45;
   const radial = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(w, h) * 0.7);
-  radial.addColorStop(0,   lighten(color, 0.55));
-  radial.addColorStop(0.5, lighten(color, 0.15));
+  radial.addColorStop(0,   lighten(color, 0.35));
+  radial.addColorStop(0.5, lighten(color, 0.08));
   radial.addColorStop(1,   color);
   ctx.fillStyle = radial;
   ctx.beginPath();
@@ -100,7 +100,7 @@ export function drawBlock(ctx, px, py, size, color, ghost = false) {
 
   // 3. Soft white sheen across the upper half (the "wet" gloss).
   const glossGrad = ctx.createLinearGradient(x, y, x, y + h * 0.55);
-  glossGrad.addColorStop(0, 'rgba(255,255,255,0.28)');
+  glossGrad.addColorStop(0, 'rgba(255,255,255,0.16)');
   glossGrad.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = glossGrad;
   ctx.beginPath();
@@ -117,8 +117,8 @@ export function drawBlock(ctx, px, py, size, color, ghost = false) {
     cx, y + h * 0.28, 0,
     cx, y + h * 0.28, w * 0.45
   );
-  spot.addColorStop(0,   'rgba(255,255,255,0.7)');
-  spot.addColorStop(0.4, 'rgba(255,255,255,0.18)');
+  spot.addColorStop(0,   'rgba(255,255,255,0.42)');
+  spot.addColorStop(0.4, 'rgba(255,255,255,0.10)');
   spot.addColorStop(1,   'rgba(255,255,255,0)');
   ctx.fillStyle = spot;
   ctx.fillRect(x, y, w, h);

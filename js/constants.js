@@ -38,3 +38,10 @@ export const LINE_SCORES = [0, 100, 300, 500, 800];
 // During this window, gameplay pauses and the cleared rows
 // flash + wipe outward from the center.
 export const CLEAR_DURATION = 280;
+
+// Board-shake on piece lock — pixels of max displacement & duration.
+// SHAKE_LOCK is for natural / soft-drop locks; hard drops scale up
+// with the drop distance (see Game.hardDrop).
+export const SHAKE_DURATION = 220;
+export const SHAKE_LOCK     = 2;
+export const SHAKE_HARDDROP = 4;

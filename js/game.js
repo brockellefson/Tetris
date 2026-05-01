@@ -13,6 +13,7 @@
 
 import {
   GRAVITY, DAS, ARR, SOFT, LINE_SCORES, CLEAR_DURATION,
+  SHAKE_DURATION, SHAKE_LOCK, SHAKE_HARDDROP,
 } from './constants.js';
 import { newBoard, collides, lockPiece, findFullRows, removeRows } from './board.js';
 import { spawn, tryMove, tryRotate, ghostPosition } from './piece.js';
@@ -44,7 +45,32 @@ export class Game {
     // the game pauses gravity/input and the renderer plays the effect.
     this.clearingRows = [];
     this.clearTimer  = 0;
+    // Board-shake state — set by triggerShake(), decayed in tick(),
+    // read by main.js as a CSS transform on the canvas.
+    this.shakeTimer     = 0;
+    this.shakeIntensity = 0;
     this.refillQueue();
+  }
+
+  // Kick off a shake. Larger calls overwrite — hard drops will
+  // therefore "win" over the small lock shake fired by lockCurrent().
+  triggerShake(intensity) {
+    this.shakeIntensity = intensity;
+    this.shakeTimer = 0;
+  }
+
+  // Current shake offset in pixels — damped oscillation, mostly vertical.
+  shakeOffset() {
+    if (this.shakeIntensity <= 0 || this.shakeTimer >= SHAKE_DURATION) {
+      return { x: 0, y: 0 };
+    }
+    const t     = this.shakeTimer / SHAKE_DURATION;
+    const decay = 1 - t;
+    const phase = t * Math.PI * 6;        // ~3 oscillations
+    return {
+      x: this.shakeIntensity * 0.35 * Math.sin(phase * 1.7) * decay,
+      y: this.shakeIntensity        * Math.sin(phase)       * decay,
+    };
   }
 
   // True while a line-clear animation is playing.
@@ -123,6 +149,9 @@ export class Game {
     }
     this.score += drops * 2; // 2 points per hard-dropped cell
     this.lockCurrent();
+    // Bigger shake for longer falls — gives hard drops their "weight".
+    // Fires AFTER lockCurrent so it overwrites the small lock shake.
+    this.triggerShake(Math.min(8, SHAKE_HARDDROP + drops * 0.18));
   }
 
   holdPiece() {
@@ -142,6 +171,7 @@ export class Game {
 
   lockCurrent() {
     lockPiece(this.board, this.current);
+    this.triggerShake(SHAKE_LOCK); // small bounce on every placement
     const fullRows = findFullRows(this.board);
     if (fullRows.length > 0) {
       // Start the clear animation. The rows stay on the board — the
@@ -198,6 +228,15 @@ export class Game {
 
   tick(dt) {
     if (!this.started || this.paused || this.gameOver) return;
+
+    // Decay any active board shake (continues during line-clear animations).
+    if (this.shakeIntensity > 0) {
+      this.shakeTimer += dt;
+      if (this.shakeTimer >= SHAKE_DURATION) {
+        this.shakeIntensity = 0;
+        this.shakeTimer = 0;
+      }
+    }
 
     // Line-clear animation takes precedence — pause gravity & input
     // while the cleared rows flash and wipe.
