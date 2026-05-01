@@ -179,15 +179,6 @@ canvas { display: block; }
 
 .powerup-menu-inner { text-align: center; }
 
-.powerup-menu-inner h2 {
-  font-size: 22px;
-  font-weight: 800;
-  letter-spacing: 5px;
-  margin-bottom: 28px;
-  color: #e6e6e6;
-  text-shadow: 0 0 12px rgba(0, 240, 240, 0.5);
-}
-
 .powerup-cards { display: flex; gap: 18px; justify-content: center; }
 
 .powerup-card {
@@ -225,6 +216,17 @@ canvas { display: block; }
   box-shadow: 0 0 32px rgba(0, 240, 240, 0.55);
 }
 
+/* The buff and curse halves share the card 50/50 — both get flex: 1
+   and center their own content vertically so the two stanzas feel
+   balanced regardless of how long either description runs. */
+.powerup-card-buff,
+.powerup-card-curse {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
 .powerup-card-name {
   font-size: 18px;
   font-weight: 700;
@@ -239,7 +241,6 @@ canvas { display: block; }
   font-size: 13px;
   line-height: 1.55;
   color: #b0b6c4;
-  flex: 1;
 }
 
 .powerup-card-key {
@@ -268,48 +269,35 @@ canvas { display: block; }
   to   { opacity: 1; transform: translateY(0)    scale(1);    }
 }
 
-/* ======== Curse menu — debuff variant of the power-up modal ======== */
-/* Reuses powerup-menu-inner / powerup-cards / powerup-card classes
-   for layout. The #curse-menu id retints everything red.            */
-#curse-menu {
-  position: fixed;
-  inset: 0;
-  background: rgba(18, 6, 8, 0.86);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-  animation: menu-fade 0.25s ease-out;
-}
-#curse-menu.hidden { display: none; }
-
-#curse-menu .powerup-menu-inner h2 {
-  color: #ff6464;
-  text-shadow: 0 0 14px rgba(240, 0, 0, 0.6);
+/* ======== Bundled curse on each power-up card ======== */
+/* The lower half of every power-up card shows the curse that rides
+   along if the player picks that card. Tinted red so the cost reads
+   distinctly from the (cyan) buff above it — the color contrast is
+   enough of a divider on its own, no rule needed.                    */
+.powerup-card-curse {
+  padding-top: 14px;
+  text-align: center;
 }
 
-#curse-menu .powerup-card {
-  background: #1a0e12;
-  border-color: #3a1822;
-  animation: card-enter 0.35s cubic-bezier(0.2, 0.8, 0.3, 1) backwards;
-}
-#curse-menu .powerup-card:hover,
-#curse-menu .powerup-card:focus,
-#curse-menu .powerup-card.selected {
-  border-color: #ff3030;
-  box-shadow: 0 0 24px rgba(255, 48, 48, 0.30);
-}
-#curse-menu .powerup-card.selected {
-  border-width: 2px;
-  box-shadow: 0 0 32px rgba(255, 48, 48, 0.55);
-}
-#curse-menu .powerup-card-name {
+.powerup-card-curse-name {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
   color: #ff5050;
   text-shadow: 0 0 10px currentColor;
+  margin-bottom: 14px;
 }
-#curse-menu .powerup-card-desc { color: #c8a8b0; }
+
+.powerup-card-curse-desc {
+  font-size: 13px;
+  line-height: 1.55;
+  color: #c8a8b0;
+}
+
+/* The card needs a touch more vertical room to fit both equal halves
+   comfortably without squishing either description. */
+.powerup-card { min-height: 300px; }
 
 /* ======== Active curse indicators (sit under the score panel) ======== */
 #curse-section.hidden { display: none; }

@@ -141,10 +141,9 @@ export function setupInput(game, callbacks = {}) {
       return;
     }
 
-    // Power-up / curse choice menu open — game inputs are ignored.
-    // Each menu owns its own keyboard listener (arrows/Enter/1-2-3) in main.js.
+    // Power-up choice menu open — game inputs are ignored. The menu
+    // owns its own keyboard listener (arrows/Enter/1-2-3) in main.js.
     if (game.pendingChoices > 0) return;
-    if (game.pendingCurses  > 0) return;
 
     switch (e.key) {
       case 'ArrowLeft':

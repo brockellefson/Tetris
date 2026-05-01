@@ -77,12 +77,16 @@ export class Game {
     this.pendingChoices = 0;
     // The very first line clear of a run grants a bonus power-up choice
     // so the player gets a taste of the roguelite progression early
-    // without having to slog through 5 lines first. Flag flips once and
-    // stays flipped until reset().
+    // without having to slog through 5 lines first. Curses ride along
+    // with each card now, so this single bonus also delivers a free
+    // curse. Flag flips once and stays flipped until reset().
     this.firstClearAwarded = false;
-    // Curses — debuffs the player must pick every 10 lines (every level).
-    //   junk                — true once Junk has been picked. Each subsequent
-    //                         level-up adds a row of junk blocks at the bottom.
+    // Curses — debuffs bundled with each power-up choice. Whichever
+    // power-up card the player picks, they also accept its random
+    // attached curse, so every upgrade has a cost.
+    //   junk                — true once Junk has been picked. Picking the
+    //                         curse drops a one-time batch of 3-5 junk rows
+    //                         onto the board; flag is mostly used for HUD.
     //   hyped               — gravity-table offset added to (level - 1).
     //                         Stacks on each pick. 0 = normal speed.
     //   flexibleUntilLevel  — while game.level <= this, the bag excludes
@@ -94,7 +98,6 @@ export class Game {
       flexibleUntilLevel: 0,
       rain: false,
     };
-    this.pendingCurses = 0;
     // Rain curse: counts piece placements while curses.rain is active.
     // Rolls over to 0 after every batch of 5 — see lockCurrent().
     this.placementCount = 0;
@@ -210,11 +213,11 @@ export class Game {
     this.pendingChoices = Math.max(0, this.pendingChoices - 1);
   }
 
-  // Apply a chosen curse. Same shape as applyPowerUp — main.js calls
-  // this when the player picks a card from the curse menu.
+  // Apply a chosen curse. Mirrors applyPowerUp — main.js calls this
+  // alongside applyPowerUp when the player picks a bundled card so
+  // both the buff and its attached debuff land in one pick.
   applyCurse(curse) {
     curse.apply(this);
-    this.pendingCurses = Math.max(0, this.pendingCurses - 1);
   }
 
   // Growth Spurt power-up — widen the board by one column, on the right
@@ -248,11 +251,11 @@ export class Game {
     }
   }
 
-  // Drops a random batch of 1-3 junk rows in one go. Stops early if
+  // Drops a random batch of 3-5 junk rows in one go. Stops early if
   // the game already ended (so we don't keep mutating after game over).
   // Returns how many rows actually got placed so callers can drive UI.
   addJunkBatch() {
-    const count = 1 + Math.floor(Math.random() * 3); // 1, 2, or 3
+    const count = 3 + Math.floor(Math.random() * 3); // 3, 4, or 5
     let placed = 0;
     for (let i = 0; i < count; i++) {
       if (this.gameOver) break;
@@ -567,21 +570,16 @@ export class Game {
     this.lines += cleared;
     this.level = Math.floor(this.lines / 10) + 1;
 
-    // Junk curse: each level-up while the curse is active drops a
-    // batch of 1-3 junk rows onto the board. Done before spawning the
-    // next piece so the spawn-collision check reads the new geometry.
-    // (Multiple level transitions in one clear are rare — even a
-    // tetris from line 6 only nudges the level once — so we just fire
-    // a single batch per completeClear and don't multiply it.)
-    if (this.level > oldLevel && this.curses.junk) {
-      const placed = this.addJunkBatch();
-      this.onJunk?.(placed);
-    }
+    // (Junk curse used to drop another batch on every level-up here;
+    // it's now a one-shot hit at pick time, so nothing to do on
+    // level-up.)
 
     // Roguelite power-up milestone — every 5 lines earns a choice.
     // (Max 1 per clear since clears top out at 4 lines.) The very
     // first line clear of a run also earns a bonus choice on top of
     // any milestone, so a starting tetris awards 2 power-ups.
+    // Each card in the resulting menu carries its own random curse
+    // (see js/main.js) — there's no separate curse milestone anymore.
     let milestonesEarned =
       Math.floor(this.lines / 5) - Math.floor(linesBefore / 5);
     if (!this.firstClearAwarded && cleared > 0) {
@@ -591,14 +589,6 @@ export class Game {
     if (milestonesEarned > 0) {
       this.pendingChoices += milestonesEarned;
       this.onPowerUpChoice?.(this.pendingChoices);
-    }
-
-    // Curse milestone — every 10 lines (== every level transition).
-    const cursesEarned =
-      Math.floor(this.lines / 10) - Math.floor(linesBefore / 10);
-    if (cursesEarned > 0) {
-      this.pendingCurses += cursesEarned;
-      this.onCurseChoice?.(this.pendingCurses);
     }
 
     // Visual / FX hooks — fired in importance order so the notification
@@ -656,9 +646,8 @@ export class Game {
 
   tick(dt) {
     if (!this.started || this.paused || this.gameOver) return;
-    // Freeze gameplay while any choice menu (power-up or curse) is open.
+    // Freeze gameplay while the power-up choice menu is open.
     if (this.pendingChoices > 0) return;
-    if (this.pendingCurses  > 0) return;
 
     // Chisel: while waiting for the player to pick a block, gameplay
     // is frozen. While the destruction animation plays, gameplay is
