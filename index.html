@@ -106,6 +106,12 @@
     </div>
   </div>
 
+  <!-- Background theme music. Loops forever once the game starts.
+       Browsers gate audio playback behind a user gesture, so we don't
+       call .play() until the player presses their first key (handled
+       in main.js via the onStart callback). -->
+  <audio id="theme-music" src="assets/theme.mp3" loop preload="auto"></audio>
+
   <script type="module" src="js/main.js"></script>
 </body>
 </html>

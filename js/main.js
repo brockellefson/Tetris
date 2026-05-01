@@ -377,10 +377,28 @@ game.onFillComplete = ()  => showNextChoice();
 game.onJunk           = (n) => notify(n > 1 ? `JUNK +${n}` : 'JUNK', 'b2b', 1400);
 game.onRain           = (n) => notify(n > 1 ? `RAIN +${n}` : 'RAIN', 'b2b', 1300);
 
+// -------- Background theme music --------
+// Plain <audio loop> element handles the looping for us — we just
+// drive play / pause from the game's lifecycle callbacks. Browsers
+// require a user gesture before audio can start, so the first call
+// happens in onStart (triggered by the player's first key press).
+const themeMusic$ = document.getElementById('theme-music');
+themeMusic$.volume = 0.5; // sit under the SFX without drowning them
+function playTheme() {
+  // .play() returns a promise that rejects if the browser still
+  // refuses (e.g. the gesture didn't propagate). Swallow the rejection
+  // so it doesn't show up as an unhandled error in the console.
+  const p = themeMusic$.play();
+  if (p && typeof p.catch === 'function') p.catch(() => {});
+}
+function pauseTheme() {
+  themeMusic$.pause();
+}
+
 setupInput(game, {
-  onStart:  () => { hideOverlay(); clearMenus(); },
-  onPause:  () => showOverlay('PAUSED', 'PRESS P TO RESUME'),
-  onResume: hideOverlay,
+  onStart:  () => { hideOverlay(); clearMenus(); playTheme(); },
+  onPause:  () => { showOverlay('PAUSED', 'PRESS P TO RESUME'); pauseTheme(); },
+  onResume: () => { hideOverlay(); playTheme(); },
 });
 
 // -------- Chisel / Fill power-ups — pick a cell on the board --------
