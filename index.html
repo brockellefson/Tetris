@@ -59,18 +59,6 @@
             <div class="curse-list" id="curse-list"></div>
           </div>
         </div>
-        <div class="controls">
-          <kbd>&larr;</kbd><kbd>&rarr;</kbd> move<br>
-          <kbd>&darr;</kbd> soft drop<br>
-          <kbd>&uarr;</kbd> rotate<br>
-          <kbd>Space</kbd> hard drop<br>
-          <kbd>C</kbd> hold<br>
-          <kbd>A</kbd> chisel<br>
-          <kbd>S</kbd> fill<br>
-          <kbd>F</kbd> flip<br>
-          <kbd>P</kbd> pause<br>
-          <kbd>R</kbd> restart
-        </div>
       </div>
 
       <div id="board-wrap">
@@ -91,6 +79,20 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- Controls reference. Anchored to the bottom-right corner of the
+         viewport rather than living inside the .game grid, so it stays
+         pinned in place regardless of how tall the Next/Hold panels
+         render. Each row is a grid cell pair (kbd, label) so the kbds
+         line up in a clean column instead of drifting around with the
+         label widths. -->
+    <div class="controls">
+      <kbd>P</kbd><span>pause</span>
+      <kbd>C</kbd><span>hold</span>
+      <kbd>A</kbd><span>chisel</span>
+      <kbd>S</kbd><span>fill</span>
+      <kbd>F</kbd><span>flip</span>
     </div>
   </div>
 

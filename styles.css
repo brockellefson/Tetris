@@ -359,15 +359,29 @@ canvas { display: block; }
   50%           { opacity: 0.92; }
 }
 
+/* Controls reference — pinned to the bottom-right corner of the
+   viewport. Lives outside the .game grid so its position is decoupled
+   from the Hold/Next panel heights (which depend on power-up unlocks
+   and were causing layout drift in earlier attempts). 2-column grid:
+   kbds in the left cell, labels in the right cell — keeps everything
+   aligned into a tidy block instead of jagged right-aligned rows. */
 .controls {
-  margin-top: 14px;
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: auto auto;
+  column-gap: 8px;
+  row-gap: 6px;
+  align-items: center;
   font-family: 'Orbitron', sans-serif;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
   color: var(--text-dim);
-  line-height: 1.9;
   letter-spacing: 1px;
   text-transform: uppercase;
+  pointer-events: none;  /* purely informational — never intercept clicks */
 }
 
 .controls kbd {
@@ -380,11 +394,20 @@ canvas { display: block; }
   font-family: 'Orbitron', monospace;
   font-size: 10px;
   font-weight: 700;
-  margin-right: 5px;
+  /* Center-align the single character inside the kbd box so all five
+     pills look the same width regardless of glyph (P/C/A/S/F). */
+  min-width: 18px;
+  text-align: center;
   box-shadow:
     0 0 4px rgba(0, 245, 255, 0.6),
     inset 0 0 4px rgba(0, 245, 255, 0.2);
   text-shadow: 0 0 4px var(--neon-cyan);
+}
+
+.controls span {
+  /* Labels hug the left edge of the right column so they line up under
+     each other, matching the kbd column. */
+  text-align: left;
 }
 
 /* ============================================================

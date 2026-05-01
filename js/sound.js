@@ -332,6 +332,75 @@ export function playChiselSound() {
   snap.stop(now + 0.13);
 }
 
+// Quick "swoosh" played when the Flip power-up mirrors the active
+// piece. Two simultaneous pitch sweeps moving in opposite directions
+// — one rising, one falling — sonically mirror each other, which is
+// the same gesture the power-up performs on the piece. A bandpassed
+// noise tail adds a soft air-whoosh so the cue reads as motion rather
+// than just a tone.
+export function playFlipSound() {
+  const ac = getCtx();
+  const now = ac.currentTime;
+  const dur = 0.22;
+
+  // Master envelope — crisp attack, fast tail. Flip is instant, the
+  // sound shouldn't linger past the visual.
+  const env = ac.createGain();
+  env.gain.setValueAtTime(0, now);
+  env.gain.linearRampToValueAtTime(0.13, now + 0.01);
+  env.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+  const lpf = ac.createBiquadFilter();
+  lpf.type = 'lowpass';
+  lpf.frequency.value = 3200;
+  lpf.Q.value = 0.7;
+  lpf.connect(env);
+  env.connect(ac.destination);
+
+  // Rising voice: G4 → C6. Triangle for a softer body than square.
+  const up = ac.createOscillator();
+  up.type = 'triangle';
+  up.frequency.setValueAtTime(392.00, now);
+  up.frequency.exponentialRampToValueAtTime(1046.50, now + 0.16);
+  up.connect(lpf);
+
+  // Falling voice: C6 → G4. The two voices cross at the midpoint,
+  // which is what makes the cue read as "mirrored."
+  const down = ac.createOscillator();
+  down.type = 'triangle';
+  down.frequency.setValueAtTime(1046.50, now);
+  down.frequency.exponentialRampToValueAtTime(392.00, now + 0.16);
+  down.connect(lpf);
+
+  up.start(now);
+  down.start(now);
+  up.stop(now + dur + 0.02);
+  down.stop(now + dur + 0.02);
+
+  // Short bandpassed-noise breath underneath — air moving past the piece.
+  const noiseBuf = ac.createBuffer(1, Math.floor(ac.sampleRate * dur), ac.sampleRate);
+  const data = noiseBuf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const noise = ac.createBufferSource();
+  noise.buffer = noiseBuf;
+
+  const noiseBP = ac.createBiquadFilter();
+  noiseBP.type = 'bandpass';
+  noiseBP.frequency.value = 2200;
+  noiseBP.Q.value = 0.9;
+
+  const noiseEnv = ac.createGain();
+  noiseEnv.gain.setValueAtTime(0.05, now);
+  noiseEnv.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+  noise.connect(noiseBP);
+  noiseBP.connect(noiseEnv);
+  noiseEnv.connect(ac.destination);
+
+  noise.start(now);
+  noise.stop(now + dur);
+}
+
 // Soft low "thump" played when a fill power-up materializes a block.
 // A short sine drop from 220 Hz to 110 Hz reads as something solid
 // settling into place — opposite character from the chisel "crack."

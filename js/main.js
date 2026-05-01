@@ -9,7 +9,7 @@
 import { Game } from './game.js';
 import { drawBoard, drawMini } from './render.js';
 import { setupInput } from './input.js';
-import { playLockSound, playClearSound, playCycleSound, playSelectSound, playMenuOpenSound, playChiselSound, playFillSound } from './sound.js';
+import { playLockSound, playClearSound, playCycleSound, playSelectSound, playMenuOpenSound, playChiselSound, playFillSound, playFlipSound } from './sound.js';
 import { pickChoices } from './powerups/index.js';
 import { pickCurseChoices } from './curses/index.js';
 import { COLS, ROWS, BLOCK } from './constants.js';
@@ -361,6 +361,8 @@ game.onCursorMove   = playCycleSound;
 // fire in chiselSelect / fillSelect right after the board mutates.
 game.onChiselHit    = playChiselSound;
 game.onFillHit      = playFillSound;
+// Flip fires only on a successful mirror — blocked attempts stay silent.
+game.onFlip         = playFlipSound;
 game.onCombo        = (n)   => notify(`COMBO × ${n}`, 'combo');
 game.onTetris       = (b2b) => notify(b2b ? 'BACK-TO-BACK TETRIS' : 'TETRIS', b2b ? 'b2b' : 'tetris', 1900);
 game.onPerfectClear = ()    => notify('PERFECT CLEAR', 'perfect', 2100);

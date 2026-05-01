@@ -198,6 +198,7 @@ export class Game {
     // Treat a successful flip as a player adjustment — refresh the
     // Slick lock-delay window so chaining flip + slide stays smooth.
     this.lockDelayTimer = 0;
+    this.onFlip?.();                            // optional FX hook
     return true;
   }
 
