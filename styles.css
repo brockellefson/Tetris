@@ -1,12 +1,82 @@
+/* ============================================================
+   Synthwave Tetris — neon, glow, and a sunset horizon
+   ============================================================
+   Color tokens used throughout this file:
+     --neon-pink   #ff2a92   primary "hot" accent
+     --neon-cyan   #00f5ff   secondary cool accent
+     --neon-violet #b026ff   tertiary highlight
+     --neon-yellow #fff700   max-attention pop (TETRIS, perfect)
+     --bg-deep     #08001a   far-back violet-black
+     --bg-mid      #1a0033   panel base
+     --bg-edge     #2a0044   panel border
+   ------------------------------------------------------------ */
+
+:root {
+  --neon-pink:   #ff2a92;
+  --neon-cyan:   #00f5ff;
+  --neon-violet: #b026ff;
+  --neon-yellow: #fff700;
+  --neon-red:    #ff4060;
+  --bg-deep:     #08001a;
+  --bg-mid:      #1a0033;
+  --bg-edge:     #2a0044;
+  --text-bright: #ffe6ff;
+  --text-dim:    #b48dd8;
+}
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body {
   height: 100%;
-  background: #0b0d12;
-  color: #e6e6e6;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  /* Sunset horizon — deep purple at the top fading down through
+     magenta toward a hot-pink "vanishing point" near the bottom.
+     Sits behind everything, including the playfield wrap.        */
+  background:
+    radial-gradient(ellipse 80% 55% at 50% 100%, rgba(255, 42, 146, 0.35) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 50% 100%, rgba(176, 38, 255, 0.30) 0%, transparent 70%),
+    linear-gradient(180deg, #08001a 0%, #14002b 45%, #2a0044 80%, #4a0066 100%);
+  background-attachment: fixed;
+  color: var(--text-bright);
+  font-family: 'Orbitron', 'Rajdhani', -apple-system, BlinkMacSystemFont, sans-serif;
   user-select: none;
   overflow: hidden;
+}
+
+/* The grid floor — a single thin animated horizon line glowing along
+   the bottom edge to sell the "we're racing toward the sun" vibe.
+   Pure decoration; sits behind everything and never catches input.   */
+body::before {
+  content: '';
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 8%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent 0%, var(--neon-pink) 50%, transparent 100%);
+  box-shadow:
+    0 0 12px var(--neon-pink),
+    0 0 30px var(--neon-pink),
+    0 0 60px var(--neon-violet);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Subtle CRT scanlines layered over the whole viewport — barely
+   perceptible (3% alpha) but they tie the look together. */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(255, 255, 255, 0.03) 0px,
+    rgba(255, 255, 255, 0.03) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  pointer-events: none;
+  z-index: 1;
+  mix-blend-mode: overlay;
 }
 
 #app {
@@ -15,6 +85,8 @@ html, body {
   align-items: center;
   justify-content: center;
   padding: 20px;
+  position: relative;
+  z-index: 2;
 }
 
 .game {
@@ -24,27 +96,46 @@ html, body {
   align-items: start;
 }
 
+/* ---- Panels ----
+   Glassy violet rectangles with a hot-pink + cyan double-edge glow.
+   The dual-color border is what really sells the synthwave look. */
 .panel {
-  background: #151821;
-  border: 1px solid #232838;
-  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(42, 0, 68, 0.85) 0%, rgba(20, 0, 43, 0.85) 100%);
+  border: 1px solid var(--neon-pink);
+  border-radius: 6px;
   padding: 14px;
+  box-shadow:
+    0 0 8px rgba(255, 42, 146, 0.45),
+    0 0 22px rgba(255, 42, 146, 0.25),
+    inset 0 0 14px rgba(176, 38, 255, 0.15);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
 }
 
 .panel h2 {
+  font-family: 'Orbitron', sans-serif;
   font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 1.5px;
-  color: #7a8294;
+  letter-spacing: 2.5px;
+  color: var(--neon-cyan);
   margin-bottom: 10px;
-  font-weight: 600;
+  font-weight: 700;
+  text-shadow:
+    0 0 6px var(--neon-cyan),
+    0 0 12px rgba(0, 245, 255, 0.5);
 }
 
 .stat {
-  font-size: 22px;
-  font-weight: 700;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 24px;
+  font-weight: 800;
   margin-bottom: 14px;
   font-variant-numeric: tabular-nums;
+  color: var(--text-bright);
+  text-shadow:
+    0 0 6px var(--neon-pink),
+    0 0 14px rgba(255, 42, 146, 0.65);
+  letter-spacing: 1px;
 }
 
 .stat:last-child { margin-bottom: 0; }
@@ -53,64 +144,109 @@ canvas { display: block; }
 
 #board { will-change: transform; }
 
+/* The playfield wrap — strongest neon outline on the page since this
+   is where the eye lives. Triple shadow stack: tight inner pink,
+   medium cyan halo, wide violet bloom.                              */
 #board-wrap {
   position: relative;
-  background: #0e1018;
-  border: 1px solid #232838;
-  border-radius: 10px;
+  background: #0a0014;
+  border: 2px solid var(--neon-pink);
+  border-radius: 6px;
   padding: 8px;
+  box-shadow:
+    0 0 0 1px rgba(255, 42, 146, 0.4),
+    0 0 14px var(--neon-pink),
+    0 0 36px rgba(0, 245, 255, 0.35),
+    0 0 80px rgba(176, 38, 255, 0.4),
+    inset 0 0 28px rgba(176, 38, 255, 0.2);
 }
 
-.mini { background: #0e1018; border-radius: 6px; }
+.mini {
+  background: #0a0014;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 42, 146, 0.4);
+  box-shadow: inset 0 0 12px rgba(176, 38, 255, 0.25);
+}
 
 .next-list { display: flex; flex-direction: column; gap: 6px; }
 
+/* ---- Start / pause / game-over overlay ---- */
 #overlay {
   position: absolute;
   inset: 8px;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: rgba(11, 13, 18, 0.85);
-  border-radius: 6px;
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: 2px;
+  background:
+    radial-gradient(ellipse at center, rgba(26, 0, 51, 0.92) 0%, rgba(10, 0, 26, 0.96) 100%);
+  border-radius: 4px;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 4px;
   text-align: center;
   line-height: 1.4;
-  color: #e6e6e6;
+  color: var(--neon-cyan);
+  text-shadow:
+    0 0 10px var(--neon-cyan),
+    0 0 24px var(--neon-cyan),
+    0 0 48px rgba(0, 245, 255, 0.6);
+  text-transform: uppercase;
+  animation: overlay-flicker 4s ease-in-out infinite;
 }
 
 #overlay.hidden { display: none; }
 
 #overlay small {
   display: block;
-  margin-top: 14px;
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 1px;
-  color: #7a8294;
+  margin-top: 16px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 3px;
+  color: var(--neon-pink);
+  text-shadow: 0 0 8px var(--neon-pink);
+}
+
+/* Subtle CRT-style flicker on the big neon overlay text. */
+@keyframes overlay-flicker {
+  0%, 100%      { opacity: 1; }
+  47%, 49%, 51% { opacity: 1; }
+  48%           { opacity: 0.86; }
+  50%           { opacity: 0.92; }
 }
 
 .controls {
   margin-top: 14px;
-  font-size: 11px;
-  color: #7a8294;
-  line-height: 1.7;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-dim);
+  line-height: 1.9;
+  letter-spacing: 1px;
+  text-transform: uppercase;
 }
 
 .controls kbd {
   display: inline-block;
-  background: #232838;
-  color: #e6e6e6;
-  padding: 1px 6px;
+  background: linear-gradient(180deg, #2a0044 0%, #1a0033 100%);
+  color: var(--neon-cyan);
+  padding: 2px 7px;
+  border: 1px solid var(--neon-cyan);
   border-radius: 3px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: 'Orbitron', monospace;
   font-size: 10px;
-  margin-right: 4px;
+  font-weight: 700;
+  margin-right: 5px;
+  box-shadow:
+    0 0 4px rgba(0, 245, 255, 0.6),
+    inset 0 0 4px rgba(0, 245, 255, 0.2);
+  text-shadow: 0 0 4px var(--neon-cyan);
 }
 
-/* ======== Notifications (combo / TETRIS / perfect clear) ======== */
+/* ============================================================
+   Notifications — combo / TETRIS / B2B / perfect-clear popups
+   ============================================================ */
 #notifications {
   position: absolute;
   top: 32px;
@@ -125,24 +261,30 @@ canvas { display: block; }
 }
 
 .notification {
-  font-weight: 800;
+  font-family: 'Orbitron', sans-serif;
+  font-weight: 900;
   text-transform: uppercase;
-  letter-spacing: 3px;
+  letter-spacing: 4px;
+  /* Triple-stack glow — tight inner halo + wide bloom + chromatic
+     fringe in pink/violet for the iconic synthwave neon-tube look. */
   text-shadow:
-    0 0 10px currentColor,
-    0 0 22px currentColor;
+    0 0 8px currentColor,
+    0 0 18px currentColor,
+    0 0 36px currentColor,
+    -1px 0 4px var(--neon-pink),
+    1px 0 4px var(--neon-cyan);
   animation: notify 1.6s cubic-bezier(0.2, 0.8, 0.3, 1) forwards;
   white-space: nowrap;
   user-select: none;
 }
 
-.notification.combo   { font-size: 18px; color: #00f0f0; }
-.notification.tetris  { font-size: 24px; color: #f0a000; }
-.notification.b2b     { font-size: 24px; color: #ff5cf0; }
+.notification.combo   { font-size: 18px; color: var(--neon-cyan); }
+.notification.tetris  { font-size: 26px; color: var(--neon-yellow); }
+.notification.b2b     { font-size: 26px; color: var(--neon-pink); }
 .notification.perfect {
-  font-size: 30px;
-  color: #ffff66;
-  letter-spacing: 5px;
+  font-size: 32px;
+  color: var(--neon-yellow);
+  letter-spacing: 6px;
   animation: notify-perfect 2.0s cubic-bezier(0.2, 0.8, 0.3, 1) forwards;
 }
 
@@ -162,13 +304,16 @@ canvas { display: block; }
   100% { opacity: 0; transform: scale(0.95) translateY(-24px); }
 }
 
-/* ======== Power-up choice menu ======== */
+/* ============================================================
+   Power-up choice menu
+   ============================================================ */
 #powerup-menu {
   position: fixed;
   inset: 0;
-  background: rgba(11, 13, 18, 0.82);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  background:
+    radial-gradient(ellipse at center, rgba(26, 0, 51, 0.85) 0%, rgba(8, 0, 26, 0.92) 100%);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -182,21 +327,24 @@ canvas { display: block; }
 .powerup-cards { display: flex; gap: 18px; justify-content: center; }
 
 .powerup-card {
-  background: #151821;
-  border: 1px solid #232838;
-  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(42, 0, 68, 0.92) 0%, rgba(20, 0, 43, 0.92) 100%);
+  border: 1px solid var(--neon-violet);
+  border-radius: 6px;
   padding: 24px 18px;
   width: 200px;
   min-height: 220px;
   cursor: pointer;
   text-align: center;
-  color: #e6e6e6;
-  font-family: inherit;
+  color: var(--text-bright);
+  font-family: 'Orbitron', sans-serif;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
   animation: card-enter 0.35s cubic-bezier(0.2, 0.8, 0.3, 1) backwards;
+  box-shadow:
+    0 0 8px rgba(176, 38, 255, 0.5),
+    0 0 24px rgba(176, 38, 255, 0.25);
 }
 .powerup-card:nth-child(1) { animation-delay: 0.00s; }
 .powerup-card:nth-child(2) { animation-delay: 0.06s; }
@@ -205,20 +353,24 @@ canvas { display: block; }
 .powerup-card:hover,
 .powerup-card:focus,
 .powerup-card.selected {
-  border-color: #00f0f0;
+  border-color: var(--neon-cyan);
   transform: translateY(-4px);
-  box-shadow: 0 0 24px rgba(0, 240, 240, 0.25);
+  box-shadow:
+    0 0 14px var(--neon-cyan),
+    0 0 36px rgba(0, 245, 255, 0.45),
+    0 0 60px rgba(255, 42, 146, 0.25);
   outline: none;
 }
 
 .powerup-card.selected {
   border-width: 2px;
-  box-shadow: 0 0 32px rgba(0, 240, 240, 0.55);
+  box-shadow:
+    0 0 18px var(--neon-cyan),
+    0 0 48px rgba(0, 245, 255, 0.7),
+    0 0 80px rgba(255, 42, 146, 0.4);
 }
 
-/* The buff and curse halves share the card 50/50 — both get flex: 1
-   and center their own content vertically so the two stanzas feel
-   balanced regardless of how long either description runs. */
+/* Buff (top half) and curse (bottom half) split the card 50/50. */
 .powerup-card-buff,
 .powerup-card-curse {
   flex: 1;
@@ -228,36 +380,49 @@ canvas { display: block; }
 }
 
 .powerup-card-name {
+  font-family: 'Orbitron', sans-serif;
   font-size: 18px;
-  font-weight: 700;
-  letter-spacing: 2.5px;
+  font-weight: 800;
+  letter-spacing: 3px;
   text-transform: uppercase;
-  color: #00f0f0;
-  text-shadow: 0 0 10px currentColor;
+  color: var(--neon-cyan);
+  text-shadow:
+    0 0 8px currentColor,
+    0 0 18px currentColor;
   margin-bottom: 14px;
 }
 
 .powerup-card-desc {
-  font-size: 13px;
-  line-height: 1.55;
-  color: #b0b6c4;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.6;
+  color: var(--text-dim);
+  letter-spacing: 0.5px;
 }
 
 .powerup-card-key {
   margin-top: 16px;
-  font-size: 11px;
-  color: #7a8294;
-  letter-spacing: 1px;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
 }
 .powerup-card-key kbd {
   display: inline-block;
-  background: #232838;
-  color: #e6e6e6;
-  padding: 3px 10px;
+  background: linear-gradient(180deg, #2a0044 0%, #1a0033 100%);
+  color: var(--neon-cyan);
+  padding: 4px 11px;
+  border: 1px solid var(--neon-cyan);
   border-radius: 4px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: 'Orbitron', monospace;
   font-size: 12px;
   font-weight: 700;
+  box-shadow:
+    0 0 6px rgba(0, 245, 255, 0.6),
+    inset 0 0 4px rgba(0, 245, 255, 0.2);
+  text-shadow: 0 0 4px var(--neon-cyan);
 }
 
 @keyframes menu-fade {
@@ -269,39 +434,42 @@ canvas { display: block; }
   to   { opacity: 1; transform: translateY(0)    scale(1);    }
 }
 
-/* ======== Bundled curse on each power-up card ======== */
-/* The lower half of every power-up card shows the curse that rides
-   along if the player picks that card. Tinted red so the cost reads
-   distinctly from the (cyan) buff above it — the color contrast is
-   enough of a divider on its own, no rule needed.                    */
+/* ---- Curse half of each power-up card ----
+   Tinted hot-pink/red so the cost reads distinctly from the (cyan)
+   buff above it. The color split is the divider — no rule needed. */
 .powerup-card-curse {
   padding-top: 14px;
   text-align: center;
 }
 
 .powerup-card-curse-name {
+  font-family: 'Orbitron', sans-serif;
   font-size: 18px;
-  font-weight: 700;
-  letter-spacing: 2.5px;
+  font-weight: 800;
+  letter-spacing: 3px;
   text-transform: uppercase;
-  color: #ff5050;
-  text-shadow: 0 0 10px currentColor;
+  color: var(--neon-pink);
+  text-shadow:
+    0 0 8px currentColor,
+    0 0 18px currentColor;
   margin-bottom: 14px;
 }
 
 .powerup-card-curse-desc {
-  font-size: 13px;
-  line-height: 1.55;
-  color: #c8a8b0;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.6;
+  color: #d8a0c4;
+  letter-spacing: 0.5px;
 }
 
-/* The card needs a touch more vertical room to fit both equal halves
-   comfortably without squishing either description. */
+/* Card needs extra height to fit both equal halves comfortably. */
 .powerup-card { min-height: 300px; }
 
-/* ======== Active blessing indicators (sit under the score panel) ======== */
-/* Mirror of the curse-tag block, retinted cyan to match the buff color
-   used on the power-up half of each choice card.                      */
+/* ============================================================
+   Active blessing indicators (under the score panel)
+   ============================================================ */
 #blessing-section.hidden { display: none; }
 #blessing-section { margin-top: 4px; }
 .blessing-list {
@@ -312,19 +480,25 @@ canvas { display: block; }
 }
 .blessing-list:empty { display: none; }
 .blessing-tag {
-  font-size: 10px;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 9px;
   font-weight: 700;
-  letter-spacing: 1.5px;
+  letter-spacing: 2px;
   text-transform: uppercase;
-  color: #00f0f0;
-  background: #0e1a1c;
-  border: 1px solid #1a3a3e;
-  border-radius: 4px;
-  padding: 2px 7px;
-  text-shadow: 0 0 6px rgba(0, 240, 240, 0.4);
+  color: var(--neon-cyan);
+  background: rgba(0, 245, 255, 0.08);
+  border: 1px solid var(--neon-cyan);
+  border-radius: 3px;
+  padding: 3px 8px;
+  text-shadow: 0 0 6px var(--neon-cyan);
+  box-shadow:
+    0 0 6px rgba(0, 245, 255, 0.4),
+    inset 0 0 4px rgba(0, 245, 255, 0.1);
 }
 
-/* ======== Active curse indicators (sit under the score panel) ======== */
+/* ============================================================
+   Active curse indicators (under the score panel)
+   ============================================================ */
 #curse-section.hidden { display: none; }
 #curse-section { margin-top: 4px; }
 .curse-list {
@@ -335,21 +509,25 @@ canvas { display: block; }
 }
 .curse-list:empty { display: none; }
 .curse-tag {
-  font-size: 10px;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 9px;
   font-weight: 700;
-  letter-spacing: 1.5px;
+  letter-spacing: 2px;
   text-transform: uppercase;
-  color: #ff6464;
-  background: #1a0e12;
-  border: 1px solid #3a1822;
-  border-radius: 4px;
-  padding: 2px 7px;
-  text-shadow: 0 0 6px rgba(255, 80, 80, 0.4);
+  color: var(--neon-pink);
+  background: rgba(255, 42, 146, 0.08);
+  border: 1px solid var(--neon-pink);
+  border-radius: 3px;
+  padding: 3px 8px;
+  text-shadow: 0 0 6px var(--neon-pink);
+  box-shadow:
+    0 0 6px rgba(255, 42, 146, 0.4),
+    inset 0 0 4px rgba(255, 42, 146, 0.1);
 }
 
-/* ======== Chisel power-up ======== */
-/* While the player is choosing a block to chisel, the board takes
-   a crosshair cursor and shows a banner near the top.            */
+/* ============================================================
+   Chisel power-up — board cursor + hint banner
+   ============================================================ */
 #board-wrap.chiseling { cursor: crosshair; }
 #board-wrap.chiseling #board { cursor: crosshair; }
 
@@ -358,16 +536,22 @@ canvas { display: block; }
   top: 18px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(11, 13, 18, 0.78);
-  border: 1px solid #00f0f0;
-  border-radius: 6px;
+  background: rgba(10, 0, 26, 0.85);
+  border: 1px solid var(--neon-cyan);
+  border-radius: 4px;
   padding: 8px 16px;
-  font-size: 12px;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 3px;
-  color: #00f0f0;
-  text-shadow: 0 0 10px currentColor;
-  box-shadow: 0 0 20px rgba(0, 240, 240, 0.35);
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--neon-cyan);
+  text-shadow:
+    0 0 8px currentColor,
+    0 0 16px currentColor;
+  box-shadow:
+    0 0 14px var(--neon-cyan),
+    0 0 32px rgba(0, 245, 255, 0.45);
   pointer-events: none;
   z-index: 6;
   animation: chisel-pulse 1.4s ease-in-out infinite;
@@ -375,6 +559,6 @@ canvas { display: block; }
 #chisel-hint.hidden { display: none; }
 
 @keyframes chisel-pulse {
-  0%, 100% { box-shadow: 0 0 14px rgba(0, 240, 240, 0.30); }
-  50%      { box-shadow: 0 0 28px rgba(0, 240, 240, 0.55); }
+  0%, 100% { box-shadow: 0 0 12px var(--neon-cyan), 0 0 22px rgba(0, 245, 255, 0.30); }
+  50%      { box-shadow: 0 0 22px var(--neon-cyan), 0 0 44px rgba(0, 245, 255, 0.65); }
 }

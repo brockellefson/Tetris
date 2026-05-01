@@ -6,25 +6,34 @@ export const COLS = 10;
 export const ROWS = 20;
 export const BLOCK = 30;        // pixel size of one cell
 
+// ---- Synthwave palette ----
+// The piece colors are tuned to read as neon — saturated and a touch
+// shifted toward the pink/cyan/violet end of the spectrum so they
+// pop against the deep-purple board and play nicely with the glow
+// in render.js (drawBlockRaw uses each piece color as its own halo).
 export const COLORS = {
-  I: '#00f0f0',
-  O: '#f0f000',
-  T: '#a000f0',
-  S: '#00f000',
-  Z: '#f00000',
-  J: '#0040f0',
-  L: '#f0a000',
-  // JUNK is the desaturated slate used for blocks dropped by the
-  // "Junk" curse. Picked to read as inert rubble next to the saturated
-  // tetromino palette without clashing with the cyan/red UI accents.
-  JUNK:  '#6b7080',
-  // FILL is a pearly chrome used for the 1×1 block dropped by the
-  // "Fill" power-up. Light + neutral so it reads as something you
-  // (the player) added rather than another tetromino.
-  FILL: '#dadbe4',
-  GHOST: 'rgba(255,255,255,0.15)',
-  GRID:  '#1a1d28',
-  BG:    '#0e1018',
+  I: '#00f0ff',   // electric cyan
+  O: '#fff700',   // neon yellow
+  T: '#d04bff',   // ultraviolet
+  S: '#39ff7a',   // acid mint
+  Z: '#ff2e63',   // hot magenta-red
+  J: '#3a6dff',   // synth blue
+  L: '#ff8b2e',   // sunset orange
+  // JUNK reads as a cool dusty mauve — inert and washed-out next to the
+  // saturated neon tetrominoes, but still tinted enough to look at home
+  // on the deep-purple board (a true gray would punch a flat hole in it).
+  JUNK:  '#5e4a73',
+  // FILL is a pearly lavender-white — light enough to read as
+  // "something you the player added," but tinted toward magenta so it
+  // sits inside the synthwave palette instead of looking like an
+  // alien chrome chip on the board.
+  FILL: '#ead6ff',
+  GHOST: 'rgba(255,180,255,0.18)',
+  // The grid and background lean deep magenta-purple — the iconic
+  // "outrun horizon" look. The grid lines are a soft pink-violet so
+  // they whisper rather than fight the neon blocks for attention.
+  GRID:  '#3a1a55',
+  BG:    '#170028',
 };
 
 // Gravity — milliseconds per cell drop, indexed by (level - 1).
