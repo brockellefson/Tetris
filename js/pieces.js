@@ -81,8 +81,14 @@ export const KICKS_I = {
 
 // 7-bag randomizer: shuffles all 7 piece types, guaranteeing
 // each appears once per cycle. Eliminates unfair piece droughts.
-export function bagShuffle() {
-  const bag = ['I', 'O', 'T', 'S', 'Z', 'J', 'L'];
+//
+// `allowI` lets the caller exclude I-pieces, which the "Flexible"
+// curse uses to forbid line pieces for a level. The resulting
+// 6-piece bag preserves the rest of the bag's fairness guarantees.
+export function bagShuffle(allowI = true) {
+  const bag = allowI
+    ? ['I', 'O', 'T', 'S', 'Z', 'J', 'L']
+    : [     'O', 'T', 'S', 'Z', 'J', 'L'];
   for (let i = bag.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [bag[i], bag[j]] = [bag[j], bag[i]];

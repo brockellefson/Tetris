@@ -11,6 +11,7 @@ import { drawBoard, drawMini } from './render.js';
 import { setupInput } from './input.js';
 import { playLockSound, playClearSound } from './sound.js';
 import { pickChoices } from './powerups/index.js';
+import { pickCurseChoices } from './curses/index.js';
 import { COLS, ROWS } from './constants.js';
 
 // -------- DOM lookup --------
@@ -29,6 +30,10 @@ const holdPanel$    = document.getElementById('hold-panel');
 const nextPanel$    = document.getElementById('next-panel');
 const powerupMenu$  = document.getElementById('powerup-menu');
 const powerupCards$ = document.getElementById('powerup-cards');
+const curseMenu$    = document.getElementById('curse-menu');
+const curseCards$   = document.getElementById('curse-cards');
+const curseSection$ = document.getElementById('curse-section');
+const curseList$    = document.getElementById('curse-list');
 
 // -------- Floating notifications (combo / TETRIS / perfect clear) --------
 // CSS owns the animation; JS just appends the element and removes it
@@ -50,31 +55,29 @@ function hideOverlay() {
   overlay.classList.add('hidden');
 }
 
-// -------- Power-up choice menu --------
-// When the menu opens, the game is already frozen (Game.tick early-returns
-// while pendingChoices > 0). We attach a temporary keyboard handler so 1/2/3
-// pick a card; clicking a card also works. After a choice is applied, we
-// re-show the menu if more choices are queued.
-function showPowerUpMenu() {
-  const choices = pickChoices(game, 3);
-  // Defensive: if for some reason no power-ups are eligible, just consume
-  // the pending choice and continue. (Happens once everything is unlocked.)
-  if (choices.length === 0) {
-    game.pendingChoices = 0;
-    return;
-  }
+// -------- Choice menus (power-up + curse) --------
+// Both menus share the same card layout. The Game freezes while either
+// queue has pending entries (see Game.tick). After a card is picked the
+// menu hides and we ask the dispatcher which menu — if any — to open
+// next. Order: power-ups first, then curses, then resume play.
+//
+// Chisel interrupts this flow: while chisel.active or chisel.target is
+// set we never open a modal, because the modal would block the click
+// the chisel power-up is waiting for. The dispatcher gets called again
+// via game.onChiselComplete once the shatter animation finishes.
 
-  powerupCards$.innerHTML = '';
-  choices.forEach((p, i) => {
+function buildChoiceMenu({ menuEl, cardsEl, choices, onPick }) {
+  cardsEl.innerHTML = '';
+  choices.forEach((c, i) => {
     const card = document.createElement('button');
     card.className = 'powerup-card';
     card.innerHTML = `
-      <div class="powerup-card-name">${p.name}</div>
-      <div class="powerup-card-desc">${p.description}</div>
+      <div class="powerup-card-name">${c.name}</div>
+      <div class="powerup-card-desc">${c.description}</div>
       <div class="powerup-card-key"><kbd>${i + 1}</kbd></div>
     `;
-    card.addEventListener('click', () => choose(p));
-    powerupCards$.appendChild(card);
+    card.addEventListener('click', () => pick(c));
+    cardsEl.appendChild(card);
   });
 
   function onKey(e) {
@@ -82,24 +85,85 @@ function showPowerUpMenu() {
     if (idx !== -1 && idx < choices.length) {
       e.preventDefault();
       e.stopPropagation();
-      choose(choices[idx]);
+      pick(choices[idx]);
     }
   }
   document.addEventListener('keydown', onKey, { capture: true });
 
-  function choose(powerup) {
+  function pick(choice) {
     document.removeEventListener('keydown', onKey, { capture: true });
-    powerupMenu$.classList.add('hidden');
-    game.applyPowerUp(powerup);
-    // Multiple milestones earned at once → present the next menu, BUT
-    // only once the chisel interaction (if any) is finished. Otherwise
-    // the modal would block the click that the chisel needs.
-    if (game.pendingChoices > 0 && !game.chisel.active && !game.chisel.target) {
-      requestAnimationFrame(showPowerUpMenu);
-    }
+    menuEl.classList.add('hidden');
+    onPick(choice);
+    showNextChoice();
   }
 
-  powerupMenu$.classList.remove('hidden');
+  menuEl.classList.remove('hidden');
+}
+
+function showPowerUpMenu() {
+  // showNextChoice may schedule us more than once per frame (e.g. when
+  // both onPowerUpChoice and onCurseChoice fire in the same tick). Bail
+  // if the menu is already showing — the first scheduled call wins.
+  if (!powerupMenu$.classList.contains('hidden')) return;
+  if (!curseMenu$.classList.contains('hidden'))   return;
+  const choices = pickChoices(game, 3);
+  // Defensive: if no power-ups are eligible (player already unlocked all),
+  // drop the pending count and let the dispatcher move to curses.
+  if (choices.length === 0) {
+    game.pendingChoices = 0;
+    showNextChoice();
+    return;
+  }
+  buildChoiceMenu({
+    menuEl:  powerupMenu$,
+    cardsEl: powerupCards$,
+    choices,
+    onPick:  (p) => game.applyPowerUp(p),
+  });
+}
+
+function showCurseMenu() {
+  if (!curseMenu$.classList.contains('hidden'))   return;
+  if (!powerupMenu$.classList.contains('hidden')) return;
+  const choices = pickCurseChoices(game, 3);
+  if (choices.length === 0) {
+    game.pendingCurses = 0;
+    showNextChoice();
+    return;
+  }
+  buildChoiceMenu({
+    menuEl:  curseMenu$,
+    cardsEl: curseCards$,
+    choices,
+    onPick:  (c) => game.applyCurse(c),
+  });
+}
+
+// Decide which menu to surface next (or none). Called any time the
+// pending counts change: after picking a card, after the chisel
+// animation finishes, and from the Game-side onPowerUpChoice /
+// onCurseChoice hooks.
+function showNextChoice() {
+  // Don't pop a modal post game-over (junk-curse can trigger game over
+  // mid-completeClear, *before* the choice hooks fire).
+  if (game.gameOver) return;
+  // Don't pop a modal while chisel is mid-interaction.
+  if (game.chisel.active || game.chisel.target) return;
+  // Don't open a second menu if one is already up.
+  if (!powerupMenu$.classList.contains('hidden')) return;
+  if (!curseMenu$.classList.contains('hidden'))   return;
+
+  if (game.pendingChoices > 0) {
+    requestAnimationFrame(showPowerUpMenu);
+  } else if (game.pendingCurses > 0) {
+    requestAnimationFrame(showCurseMenu);
+  }
+}
+
+// Restart should always come back to a clean menu state.
+function clearMenus() {
+  powerupMenu$.classList.add('hidden');
+  curseMenu$.classList.add('hidden');
 }
 
 // Apply lock-state visibility to gated UI panels. Called every frame —
@@ -128,6 +192,27 @@ function syncChiselUI() {
   boardWrap$.classList.toggle('chiseling', active);
 }
 
+// -------- Active-curse indicator --------
+// Renders a tag for each curse currently affecting gameplay, under
+// the score panel. Cheap enough to recompute every frame.
+function syncCursesUI() {
+  const tags = [];
+  if (game.curses.junk)  tags.push('JUNK');
+  if (game.curses.hyped > 0) {
+    tags.push(game.curses.hyped > 1 ? `HYPED ×${game.curses.hyped}` : 'HYPED');
+  }
+  if (game.level <= game.curses.flexibleUntilLevel) tags.push('FLEXIBLE');
+  if (game.curses.rain)  tags.push('RAIN');
+
+  curseSection$.classList.toggle('hidden', tags.length === 0);
+  // Diff-friendly write — only touch the DOM if the set actually changed.
+  const next = tags.join(',');
+  if (curseList$.dataset.tags !== next) {
+    curseList$.dataset.tags = next;
+    curseList$.innerHTML = tags.map(t => `<span class="curse-tag">${t}</span>`).join('');
+  }
+}
+
 // -------- Boot --------
 const game = new Game();
 game.onLock         = playLockSound;
@@ -135,14 +220,16 @@ game.onLineClear    = playClearSound;
 game.onCombo        = (n)   => notify(`COMBO × ${n}`, 'combo');
 game.onTetris       = (b2b) => notify(b2b ? 'BACK-TO-BACK TETRIS' : 'TETRIS', b2b ? 'b2b' : 'tetris', 1900);
 game.onPerfectClear = ()    => notify('PERFECT CLEAR', 'perfect', 2100);
-game.onPowerUpChoice = ()   => showPowerUpMenu();
-// When the chisel animation finishes, surface any deferred power-up menu.
-game.onChiselComplete = () => {
-  if (game.pendingChoices > 0) requestAnimationFrame(showPowerUpMenu);
-};
+game.onPowerUpChoice  = ()  => showNextChoice();
+game.onCurseChoice    = ()  => showNextChoice();
+// When the chisel animation finishes, dispatch any deferred menu.
+game.onChiselComplete = ()  => showNextChoice();
+// Junk-curse FX: small notification so the row drop doesn't feel silent.
+game.onJunk           = (n) => notify(n > 1 ? `JUNK +${n}` : 'JUNK', 'b2b', 1400);
+game.onRain           = (n) => notify(n > 1 ? `RAIN +${n}` : 'RAIN', 'b2b', 1300);
 
 setupInput(game, {
-  onStart:  hideOverlay,
+  onStart:  () => { hideOverlay(); clearMenus(); },
   onPause:  () => showOverlay('PAUSED', 'PRESS P TO RESUME'),
   onResume: hideOverlay,
 });
@@ -196,6 +283,7 @@ function frame(now) {
   linesEl.textContent = game.lines;
   syncUnlocksUI();
   syncChiselUI();
+  syncCursesUI();
 
   // Game-over overlay (edge-triggered so we don't repaint every frame)
   if (game.gameOver && !prevGameOver) {

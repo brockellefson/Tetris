@@ -14,6 +14,10 @@ export const COLORS = {
   Z: '#f00000',
   J: '#0040f0',
   L: '#f0a000',
+  // JUNK is the desaturated slate used for blocks dropped by the
+  // "Junk" curse. Picked to read as inert rubble next to the saturated
+  // tetromino palette without clashing with the cyan/red UI accents.
+  JUNK:  '#6b7080',
   GHOST: 'rgba(255,255,255,0.15)',
   GRID:  '#1a1d28',
   BG:    '#0e1018',
@@ -21,11 +25,9 @@ export const COLORS = {
 
 // Gravity — milliseconds per cell drop, indexed by (level - 1).
 // Levels above the table length clamp to the last entry.
-// Curve starts at the old level-4 speed (473ms) so the early game
-// has a more engaging pace; original slow levels (1000/793/618) removed.
 export const GRAVITY = [
-  473, 355, 262, 190, 135, 94, 64, 43, 28, 18,
-  12, 8, 6, 4, 3, 2, 1, 1,
+  1000, 793, 618, 473, 355, 262, 190, 135, 94, 64,
+  43, 28, 18, 12, 8, 6, 4, 3, 2, 1, 1,
 ];
 
 // Input timing (milliseconds)

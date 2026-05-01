@@ -13,7 +13,7 @@
 // in this directory and register it in index.js.
 
 export default {
-  id: 'unlock-hold',
+  id: 'memory',
   name: 'Memory',
   description: 'Reveal the Hold slot. Press C or Shift to stash a piece for later.',
   available: (game) => !game.unlocks.hold,

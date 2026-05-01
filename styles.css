@@ -262,6 +262,67 @@ canvas { display: block; }
   to   { opacity: 1; transform: translateY(0)    scale(1);    }
 }
 
+/* ======== Curse menu — debuff variant of the power-up modal ======== */
+/* Reuses powerup-menu-inner / powerup-cards / powerup-card classes
+   for layout. The #curse-menu id retints everything red.            */
+#curse-menu {
+  position: fixed;
+  inset: 0;
+  background: rgba(18, 6, 8, 0.86);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  animation: menu-fade 0.25s ease-out;
+}
+#curse-menu.hidden { display: none; }
+
+#curse-menu .powerup-menu-inner h2 {
+  color: #ff6464;
+  text-shadow: 0 0 14px rgba(240, 0, 0, 0.6);
+}
+
+#curse-menu .powerup-card {
+  background: #1a0e12;
+  border-color: #3a1822;
+  animation: card-enter 0.35s cubic-bezier(0.2, 0.8, 0.3, 1) backwards;
+}
+#curse-menu .powerup-card:hover,
+#curse-menu .powerup-card:focus {
+  border-color: #ff3030;
+  box-shadow: 0 0 24px rgba(255, 48, 48, 0.30);
+}
+#curse-menu .powerup-card-name {
+  color: #ff5050;
+  text-shadow: 0 0 10px currentColor;
+}
+#curse-menu .powerup-card-desc { color: #c8a8b0; }
+
+/* ======== Active curse indicators (sit under the score panel) ======== */
+#curse-section.hidden { display: none; }
+#curse-section { margin-top: 4px; }
+.curse-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.curse-list:empty { display: none; }
+.curse-tag {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: #ff6464;
+  background: #1a0e12;
+  border: 1px solid #3a1822;
+  border-radius: 4px;
+  padding: 2px 7px;
+  text-shadow: 0 0 6px rgba(255, 80, 80, 0.4);
+}
+
 /* ======== Chisel power-up ======== */
 /* While the player is choosing a block to chisel, the board takes
    a crosshair cursor and shows a banner near the top.            */

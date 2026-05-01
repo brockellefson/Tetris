@@ -70,6 +70,29 @@ export class Game {
       nextCount: 0,
     };
     this.pendingChoices = 0;
+    // The very first line clear of a run grants a bonus power-up choice
+    // so the player gets a taste of the roguelite progression early
+    // without having to slog through 5 lines first. Flag flips once and
+    // stays flipped until reset().
+    this.firstClearAwarded = false;
+    // Curses — debuffs the player must pick every 10 lines (every level).
+    //   junk                — true once Junk has been picked. Each subsequent
+    //                         level-up adds a row of junk blocks at the bottom.
+    //   hyped               — gravity-table offset added to (level - 1).
+    //                         Stacks on each pick. 0 = normal speed.
+    //   flexibleUntilLevel  — while game.level <= this, the bag excludes
+    //                         I-pieces. Picking Flexible sets it to the
+    //                         current level → curse expires next level-up.
+    this.curses = {
+      junk: false,
+      hyped: 0,
+      flexibleUntilLevel: 0,
+      rain: false,
+    };
+    this.pendingCurses = 0;
+    // Rain curse: counts piece placements while curses.rain is active.
+    // Rolls over to 0 after every batch of 5 — see lockCurrent().
+    this.placementCount = 0;
     // Chisel power-up state.
     //   active — set by the Chisel power-up's apply(); freezes gameplay
     //            and tells the renderer/UI to await a block click.
@@ -86,6 +109,76 @@ export class Game {
   applyPowerUp(powerup) {
     powerup.apply(this);
     this.pendingChoices = Math.max(0, this.pendingChoices - 1);
+  }
+
+  // Apply a chosen curse. Same shape as applyPowerUp — main.js calls
+  // this when the player picks a card from the curse menu.
+  applyCurse(curse) {
+    curse.apply(this);
+    this.pendingCurses = Math.max(0, this.pendingCurses - 1);
+  }
+
+  // Push a junk row onto the bottom of the board, shifting everything
+  // up by one. The junk row is filled with the dedicated 'JUNK' cell
+  // type — rendered in a muted slate gray (see COLORS.JUNK) so the
+  // player can tell rubble apart from real placed pieces at a glance.
+  // One column is left empty so the row can theoretically be cleared.
+  // If shifting up causes the active piece to overlap a block, the
+  // game ends (mirrors how spawn-on-collision triggers game over).
+  addJunkRow() {
+    this.board.shift();
+    const COLS = this.board[0]?.length ?? 10;
+    const gap = Math.floor(Math.random() * COLS);
+    const row = [];
+    for (let c = 0; c < COLS; c++) {
+      row.push(c === gap ? null : 'JUNK');
+    }
+    this.board.push(row);
+    if (this.current && collides(this.board, this.current)) {
+      this.gameOver = true;
+    }
+  }
+
+  // Drops a random batch of 1-3 junk rows in one go. Stops early if
+  // the game already ended (so we don't keep mutating after game over).
+  // Returns how many rows actually got placed so callers can drive UI.
+  addJunkBatch() {
+    const count = 1 + Math.floor(Math.random() * 3); // 1, 2, or 3
+    let placed = 0;
+    for (let i = 0; i < count; i++) {
+      if (this.gameOver) break;
+      this.addJunkRow();
+      placed += 1;
+    }
+    return placed;
+  }
+
+  // Rain curse helper — scatters a random number (1-3) of junk blocks
+  // across the top row's currently-empty cells. Pieces spawn at row 0
+  // or row -1, so a rain block landing in a spawn-occupied column will
+  // trigger game-over via the spawn-collision check on the *next*
+  // spawnNext() call. Returns the number of blocks actually placed.
+  addRainBlocks() {
+    const COLS = this.board[0]?.length ?? 10;
+    const empties = [];
+    for (let c = 0; c < COLS; c++) {
+      if (!this.board[0][c]) empties.push(c);
+    }
+    if (empties.length === 0) return 0;
+    // Fisher-Yates so we pick distinct random columns.
+    for (let i = empties.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [empties[i], empties[j]] = [empties[j], empties[i]];
+    }
+    const count = Math.min(empties.length, 1 + Math.floor(Math.random() * 3));
+    for (let i = 0; i < count; i++) {
+      this.board[0][empties[i]] = 'JUNK';
+    }
+    // If a rain block landed inside the active piece, it's game over.
+    if (this.current && collides(this.board, this.current)) {
+      this.gameOver = true;
+    }
+    return count;
   }
 
   // Player picked a block to chisel out. Returns true if the click hit
@@ -155,7 +248,13 @@ export class Game {
   // -------- Piece management --------
 
   refillQueue() {
-    while (this.queue.length < 7) this.queue.push(...bagShuffle());
+    // While the Flexible curse is active for this level, exclude I-pieces
+    // from the bag. The bag is re-evaluated every refill, so as soon as
+    // the player levels past `flexibleUntilLevel` the I-piece returns.
+    while (this.queue.length < 7) {
+      const allowI = this.level > this.curses.flexibleUntilLevel;
+      this.queue.push(...bagShuffle(allowI));
+    }
   }
 
   spawnNext() {
@@ -232,6 +331,19 @@ export class Game {
     lockPiece(this.board, this.current);
     this.triggerShake(SHAKE_LOCK); // small bounce on every placement
     this.onLock?.(); // optional sound / FX hook (set by main.js)
+
+    // Rain curse: every 5th placement, drop a fresh batch of junk
+    // blocks into the top row. Done before findFullRows so newly-rained
+    // blocks can still complete a full row that the lock just made.
+    if (this.curses.rain) {
+      this.placementCount += 1;
+      if (this.placementCount >= 5) {
+        this.placementCount = 0;
+        const placed = this.addRainBlocks();
+        if (placed > 0) this.onRain?.(placed);
+      }
+    }
+
     const fullRows = findFullRows(this.board);
     if (fullRows.length > 0) {
       // Start the clear animation. The rows stay on the board — the
@@ -278,16 +390,42 @@ export class Game {
     if (perfect) this.score += PERFECT_CLEAR_BONUS;
 
     const linesBefore = this.lines;
+    const oldLevel = this.level;
     this.lines += cleared;
     this.level = Math.floor(this.lines / 10) + 1;
 
+    // Junk curse: each level-up while the curse is active drops a
+    // batch of 1-3 junk rows onto the board. Done before spawning the
+    // next piece so the spawn-collision check reads the new geometry.
+    // (Multiple level transitions in one clear are rare — even a
+    // tetris from line 6 only nudges the level once — so we just fire
+    // a single batch per completeClear and don't multiply it.)
+    if (this.level > oldLevel && this.curses.junk) {
+      const placed = this.addJunkBatch();
+      this.onJunk?.(placed);
+    }
+
     // Roguelite power-up milestone — every 5 lines earns a choice.
-    // (Max 1 per clear since clears top out at 4 lines.)
-    const milestonesEarned =
+    // (Max 1 per clear since clears top out at 4 lines.) The very
+    // first line clear of a run also earns a bonus choice on top of
+    // any milestone, so a starting tetris awards 2 power-ups.
+    let milestonesEarned =
       Math.floor(this.lines / 5) - Math.floor(linesBefore / 5);
+    if (!this.firstClearAwarded && cleared > 0) {
+      this.firstClearAwarded = true;
+      milestonesEarned += 1;
+    }
     if (milestonesEarned > 0) {
       this.pendingChoices += milestonesEarned;
       this.onPowerUpChoice?.(this.pendingChoices);
+    }
+
+    // Curse milestone — every 10 lines (== every level transition).
+    const cursesEarned =
+      Math.floor(this.lines / 10) - Math.floor(linesBefore / 10);
+    if (cursesEarned > 0) {
+      this.pendingCurses += cursesEarned;
+      this.onCurseChoice?.(this.pendingCurses);
     }
 
     // Visual / FX hooks — fired in importance order so the notification
@@ -332,8 +470,9 @@ export class Game {
 
   tick(dt) {
     if (!this.started || this.paused || this.gameOver) return;
-    // Freeze gameplay while a power-up choice is pending.
+    // Freeze gameplay while any choice menu (power-up or curse) is open.
     if (this.pendingChoices > 0) return;
+    if (this.pendingCurses  > 0) return;
 
     // Chisel: while waiting for the player to pick a block, gameplay
     // is frozen. While the destruction animation plays, gameplay is
@@ -381,10 +520,15 @@ export class Game {
       }
     }
 
-    // Apply gravity
+    // Apply gravity. The Hyped curse adds an offset to the level lookup
+    // so pieces fall faster than the player's actual level would imply.
+    const gravityIdx = Math.min(
+      this.level - 1 + this.curses.hyped,
+      GRAVITY.length - 1,
+    );
     const gravityMs = this.softDropping
       ? SOFT
-      : GRAVITY[Math.min(this.level - 1, GRAVITY.length - 1)];
+      : GRAVITY[Math.max(0, gravityIdx)];
     this.dropTimer += dt;
     while (this.dropTimer >= gravityMs) {
       this.dropTimer -= gravityMs;

@@ -48,9 +48,10 @@ export function setupInput(game, callbacks = {}) {
       return;
     }
 
-    // Power-up choice menu open — game inputs are ignored.
-    // The menu owns its own keyboard listener (1/2/3) in main.js.
+    // Power-up / curse choice menu open — game inputs are ignored.
+    // Each menu owns its own keyboard listener (1/2/3) in main.js.
     if (game.pendingChoices > 0) return;
+    if (game.pendingCurses  > 0) return;
 
     // Chisel power-up: while waiting for a block click or while the
     // shatter animation plays, gameplay keys are inert. R/P still work

@@ -9,7 +9,7 @@ const ROMAN = ['I', 'II', 'III', 'IV', 'V'];
 
 function makeNextSlot(n) {
   return {
-    id: `unlock-next-${n}`,
+    id: `foresight-${n}`,
     name: `Foresight ${ROMAN[n - 1]}`,
     description: n === 1
       ? 'See your next piece in the queue.'
