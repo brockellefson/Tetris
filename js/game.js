@@ -70,10 +70,6 @@ export class Game {
       hold:      false,
       ghost:     false,
       nextCount: 0,
-      // Number of extra columns granted by the Growth Spurt power-up.
-      // Caps at 5 (the highest tier). The board itself stores the actual
-      // width — this counter is just for the unlock-gating UI and reset.
-      extraCols: 0,
       // Slick — when true, a grounded piece waits LOCK_DELAY ms before
       // locking and resets that window on every successful move/rotate,
       // letting the player make split-second adjustments. The timer
@@ -107,6 +103,11 @@ export class Game {
       junk: false,
       hyped: 0,
       flexibleUntilLevel: 0,
+      // Growth — every pick widens the playfield by one column on the
+      // right edge. Stacks (caps at +5). The board itself stores the
+      // live width; this counter only drives the HUD tag and the
+      // pick-time cap in the curse's `available()` check.
+      extraCols: 0,
     };
     // Chisel power-up state.
     //   active — set by the Chisel power-up's apply(); freezes gameplay
@@ -227,7 +228,7 @@ export class Game {
     curse.apply(this);
   }
 
-  // Growth Spurt power-up — widen the board by one column, on the right
+  // Growth curse — widen the board by one column, on the right
   // edge so existing block positions and the active piece are unaffected.
   // Each row gets a trailing null appended; the renderer and click-to-cell
   // helpers read width from board[0].length so they pick the change up

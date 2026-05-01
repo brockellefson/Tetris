@@ -14,7 +14,6 @@
 import hold     from './hold.js';
 import ghost    from './ghost.js';
 import { next1, next2, next3, next4, next5 } from './psychic.js';
-import { growth1, growth2, growth3, growth4, growth5 } from './growth-spurt.js';
 import tetris    from './tetris.js';
 import chisel    from './chisel.js';
 import polish    from './polish.js';
@@ -29,11 +28,6 @@ export const ALL_POWERUPS = [
   next3,
   next4,
   next5,
-  growth1,
-  growth2,
-  growth3,
-  growth4,
-  growth5,
   tetris,
   chisel,
   polish,

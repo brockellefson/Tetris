@@ -19,7 +19,7 @@ export function newBoard() {
 // a wall, the floor, or any locked cell.
 //
 // Width is read from the board itself (not the COLS constant) so that
-// runtime-grown boards — Growth Spurt power-up adds columns — collide
+// runtime-grown boards — the Growth curse adds columns — collide
 // against their actual right edge instead of the original 10-wide wall.
 export function collides(board, piece) {
   const s = shapeOf(piece);
@@ -61,8 +61,8 @@ export function findFullRows(board) {
 
 // Removes the specified rows from the board, shifting everything above
 // down to fill the gap. Mutates `board`. Replacement rows match the
-// board's current width so a grown board (Growth Spurt power-up) keeps
-// its extra columns after a clear.
+// board's current width so a grown board (Growth curse) keeps its
+// extra columns after a clear.
 export function removeRows(board, rows) {
   const cols = board[0]?.length ?? COLS;
   // Two-phase: splice all the cleared rows out FIRST (descending so the

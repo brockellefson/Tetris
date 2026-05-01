@@ -14,8 +14,9 @@ import junk     from './junk.js';
 import hyped    from './hyped.js';
 import flexible from './flexible.js';
 import rain     from './rain.js';
+import growth   from './growth.js';
 
-export const ALL_CURSES = [junk, hyped, flexible, rain];
+export const ALL_CURSES = [junk, hyped, flexible, rain, growth];
 
 // Pick up to `count` random eligible curses for the choice menu.
 // All current curses are always available, but `available()` is

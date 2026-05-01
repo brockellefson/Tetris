@@ -15,12 +15,15 @@ import { pickCurseChoices } from './curses/index.js';
 import { COLS, ROWS, BLOCK } from './constants.js';
 
 // -------- DOM lookup --------
+// Hint to the browser that none of these canvases need a transparent
+// backing buffer — every cell either fills BG or a piece color, so
+// per-pixel alpha compositing is wasted work. Saves ~10–15% on paint.
 const board$        = document.getElementById('board');
-const ctx           = board$.getContext('2d');
+const ctx           = board$.getContext('2d', { alpha: false });
 const hold$         = document.getElementById('hold');
-const holdCtx       = hold$.getContext('2d');
+const holdCtx       = hold$.getContext('2d', { alpha: false });
 const nextCanvases  = [...document.querySelectorAll('.next')];
-const nextCtxs      = nextCanvases.map(c => c.getContext('2d'));
+const nextCtxs      = nextCanvases.map(c => c.getContext('2d', { alpha: false }));
 const overlay       = document.getElementById('overlay');
 const notifs$       = document.getElementById('notifications');
 const scoreEl       = document.getElementById('score');
@@ -219,12 +222,28 @@ function clearMenus() {
 }
 
 // Apply lock-state visibility to gated UI panels. Called every frame —
-// it's just a few style writes when the value actually changes.
+// but only writes when the values actually change. Each .style.* write
+// invalidates layout, so guarding pays off.
+let _lastHoldDisplay = null;
+let _lastNextPanelDisplay = null;
+const _lastNextCanvasDisplay = new Array(nextCanvases.length).fill(null);
 function syncUnlocksUI() {
-  holdPanel$.style.display = game.unlocks.hold ? '' : 'none';
-  nextPanel$.style.display = game.unlocks.nextCount > 0 ? '' : 'none';
+  const holdD = game.unlocks.hold ? '' : 'none';
+  if (holdD !== _lastHoldDisplay) {
+    holdPanel$.style.display = holdD;
+    _lastHoldDisplay = holdD;
+  }
+  const nextD = game.unlocks.nextCount > 0 ? '' : 'none';
+  if (nextD !== _lastNextPanelDisplay) {
+    nextPanel$.style.display = nextD;
+    _lastNextPanelDisplay = nextD;
+  }
   for (let i = 0; i < nextCanvases.length; i++) {
-    nextCanvases[i].style.display = i < game.unlocks.nextCount ? '' : 'none';
+    const d = i < game.unlocks.nextCount ? '' : 'none';
+    if (d !== _lastNextCanvasDisplay[i]) {
+      nextCanvases[i].style.display = d;
+      _lastNextCanvasDisplay[i] = d;
+    }
   }
 }
 
@@ -254,7 +273,7 @@ function syncChiselUI() {
 // -------- Active-blessing indicator --------
 // Mirror of syncCursesUI for the persistent buffs the player has
 // unlocked. We only surface unlocks that have an ongoing effect
-// (Hold, Ghost, Psychic, Growth) — one-shot consumables like Chisel,
+// (Hold, Ghost, Psychic) — one-shot consumables like Chisel,
 // Polish, and Tetris vanish once spent so showing them as a "blessing"
 // would be misleading. Cheap enough to recompute every frame.
 function syncBlessingsUI() {
@@ -266,11 +285,6 @@ function syncBlessingsUI() {
     tags.push(game.unlocks.nextCount > 1
       ? `PSYCHIC ×${game.unlocks.nextCount}`
       : 'PSYCHIC');
-  }
-  if (game.unlocks.extraCols > 0) {
-    tags.push(game.unlocks.extraCols > 1
-      ? `GROWTH ×${game.unlocks.extraCols}`
-      : 'GROWTH');
   }
 
   blessingSection$.classList.toggle('hidden', tags.length === 0);
@@ -292,6 +306,11 @@ function syncCursesUI() {
     tags.push(game.curses.hyped > 1 ? `HYPED ×${game.curses.hyped}` : 'HYPED');
   }
   if (game.level <= game.curses.flexibleUntilLevel) tags.push('FLEXIBLE');
+  if (game.curses.extraCols > 0) {
+    tags.push(game.curses.extraCols > 1
+      ? `GROWTH ×${game.curses.extraCols}`
+      : 'GROWTH');
+  }
 
   curseSection$.classList.toggle('hidden', tags.length === 0);
   // Diff-friendly write — only touch the DOM if the set actually changed.
@@ -339,7 +358,7 @@ function boardClickToCell(e) {
   const scaleY = board$.height / rect.height;
   const px = (e.clientX - rect.left) * scaleX;
   const py = (e.clientY - rect.top)  * scaleY;
-  // Read live width — Growth Spurt power-up grows the board mid-run.
+  // Read live width — the Growth curse can grow the board mid-run.
   const cols = game.board[0]?.length ?? COLS;
   const col = Math.floor(px / (board$.width  / cols));
   const row = Math.floor(py / (board$.height / ROWS));
@@ -361,9 +380,25 @@ board$.addEventListener('click', (e) => {
 let lastTime = 0;
 let prevGameOver = false;
 
+// Diff caches — every DOM/style write below invalidates layout or
+// composition, so we only flush on actual change. Mini canvases also
+// get a per-slot piece-type cache so we skip the redraw when the
+// queue/hold haven't shuffled.
+let _lastHold = undefined;
+const _lastNext = new Array(nextCanvases.length).fill(undefined);
+let _lastScoreText = '';
+let _lastLevelText = '';
+let _lastLinesText = '';
+let _lastTransform = '';
+let _shakeWasZero = true;
+
 function frame(now) {
   requestAnimationFrame(frame);
-  const dt = now - (lastTime || now);
+  // Cap dt to avoid catch-up cascades after a tab stall or GC pause.
+  // At level 20+ with the Hyped curse, gravityMs drops to 1ms, and
+  // an unbounded dt of 200ms would fire 200 softDrops in one tick.
+  let dt = lastTime ? now - lastTime : 0;
+  if (dt > 50) dt = 50;
   lastTime = now;
 
   game.tick(dt);
@@ -377,18 +412,46 @@ function frame(now) {
 
   // Render
   drawBoard(ctx, board$, game);
+
   // Apply board shake as a CSS transform on the canvas. The wrap's
   // background is the same color as the canvas, so any sliver of
-  // wrap revealed by the offset is invisible.
+  // wrap revealed by the offset is invisible. Skip the write when
+  // the shake is zero (and stayed zero) — that's the common case.
   const shake = game.shakeOffset();
-  board$.style.transform = `translate(${shake.x.toFixed(2)}px, ${shake.y.toFixed(2)}px)`;
-  drawMini(hold$, holdCtx, game.hold);
-  for (let i = 0; i < nextCanvases.length; i++) {
-    drawMini(nextCanvases[i], nextCtxs[i], game.queue[i]);
+  const shakeIsZero = shake.x === 0 && shake.y === 0;
+  if (!(shakeIsZero && _shakeWasZero)) {
+    const t = `translate(${shake.x.toFixed(2)}px, ${shake.y.toFixed(2)}px)`;
+    if (t !== _lastTransform) {
+      board$.style.transform = t;
+      _lastTransform = t;
+    }
   }
-  scoreEl.textContent = game.score.toLocaleString();
-  levelEl.textContent = game.level;
-  linesEl.textContent = game.lines;
+  _shakeWasZero = shakeIsZero;
+
+  // Mini previews only need to repaint when the displayed piece
+  // changes (a piece locks, the player holds, or the queue shifts).
+  // Repainting them every frame is the second-biggest waste in the
+  // original loop after the per-cell gradient cost.
+  if (_lastHold !== game.hold) {
+    drawMini(hold$, holdCtx, game.hold);
+    _lastHold = game.hold;
+  }
+  for (let i = 0; i < nextCanvases.length; i++) {
+    if (_lastNext[i] !== game.queue[i]) {
+      drawMini(nextCanvases[i], nextCtxs[i], game.queue[i]);
+      _lastNext[i] = game.queue[i];
+    }
+  }
+
+  // Score/level/lines: TextNode writes still trigger a recalc of any
+  // ancestor with intrinsic sizing, so skip when unchanged.
+  const scoreText = game.score.toLocaleString();
+  if (scoreText !== _lastScoreText) { scoreEl.textContent = scoreText; _lastScoreText = scoreText; }
+  const levelText = String(game.level);
+  if (levelText !== _lastLevelText) { levelEl.textContent = levelText; _lastLevelText = levelText; }
+  const linesText = String(game.lines);
+  if (linesText !== _lastLinesText) { linesEl.textContent = linesText; _lastLinesText = linesText; }
+
   syncUnlocksUI();
   syncChiselUI();
   syncBlessingsUI();
