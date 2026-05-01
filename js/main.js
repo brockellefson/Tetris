@@ -65,10 +65,10 @@ function hideOverlay() {
 // picked the menu hides and we ask the dispatcher whether another
 // power-up is queued (a tetris on first clear awards 2 picks).
 //
-// Chisel / Polish interrupts this flow: while chisel.active or
+// Chisel / Fill interrupts this flow: while chisel.active or
 // chisel.target is set we never open the modal, because the modal
 // would block the click the power-up is waiting for. The dispatcher
-// gets called again via game.onChiselComplete / onPolishComplete
+// gets called again via game.onChiselComplete / onFillComplete
 // once the relevant animation finishes.
 
 function buildChoiceMenu({ choices, onPick }) {
@@ -150,9 +150,9 @@ function buildChoiceMenu({ choices, onPick }) {
     powerupMenu$.classList.add('hidden');
     // Defer the actual apply by one frame. Belt-and-suspenders alongside
     // stopImmediatePropagation: even if a browser quirk lets the keystroke
-    // bypass that, by the time chisel/polish.active flips on, the Enter
+    // bypass that, by the time chisel/fill.active flips on, the Enter
     // event that picked the card has long since finished propagating.
-    // Otherwise input.js's chisel/polish handler can see the same Enter
+    // Otherwise input.js's chisel/fill handler can see the same Enter
     // and immediately confirm a placement before the player can navigate.
     requestAnimationFrame(() => {
       onPick(pair);
@@ -198,16 +198,16 @@ function showPowerUpMenu() {
 
 // Decide whether to surface the menu next (or not). Called any time
 // pendingChoices changes: after picking a card, after the chisel /
-// polish animation finishes, and from the Game-side onPowerUpChoice
+// fill animation finishes, and from the Game-side onPowerUpChoice
 // hook.
 function showNextChoice() {
   // Don't pop a modal post game-over (junk-curse can trigger game over
   // mid-completeClear, *before* the choice hook fires).
   if (game.gameOver) return;
-  // Don't pop a modal while chisel or polish is mid-interaction —
+  // Don't pop a modal while chisel or fill is mid-interaction —
   // the modal would steal the click/keyboard focus the power-up needs.
   if (game.chisel.active || game.chisel.target) return;
-  if (game.polish.active || game.polish.target) return;
+  if (game.fill.active || game.fill.target) return;
   // Don't open a second menu if one is already up.
   if (!powerupMenu$.classList.contains('hidden')) return;
 
@@ -247,8 +247,8 @@ function syncUnlocksUI() {
   }
 }
 
-// -------- Chisel / Polish hint banner --------
-// Shared banner — chisel and polish reuse the same overlay element
+// -------- Chisel / Fill hint banner --------
+// Shared banner — chisel and fill reuse the same overlay element
 // since only one is ever active at a time. The text & styling tweak
 // based on which power-up is currently asking for a pick.
 const boardWrap$ = document.getElementById('board-wrap');
@@ -259,12 +259,12 @@ boardWrap$.appendChild(chiselHint$);
 
 function syncChiselUI() {
   const chiselActive = game.chisel.active;
-  const polishActive = game.polish.active;
-  const active = chiselActive || polishActive;
+  const fillActive = game.fill.active;
+  const active = chiselActive || fillActive;
   if (chiselActive) {
     chiselHint$.innerHTML = 'CLICK OR USE ARROW KEYS + ENTER TO CHISEL';
-  } else if (polishActive) {
-    chiselHint$.innerHTML = 'CLICK OR USE ARROW KEYS + ENTER TO POLISH';
+  } else if (fillActive) {
+    chiselHint$.innerHTML = 'CLICK OR USE ARROW KEYS + ENTER TO FILL';
   }
   chiselHint$.classList.toggle('hidden', !active);
   boardWrap$.classList.toggle('chiseling', active);
@@ -274,7 +274,7 @@ function syncChiselUI() {
 // Mirror of syncCursesUI for the persistent buffs the player has
 // unlocked. We only surface unlocks that have an ongoing effect
 // (Hold, Ghost, Psychic) — one-shot consumables like Chisel,
-// Polish, and Tetris vanish once spent so showing them as a "blessing"
+// Fill, and Mercy vanish once spent so showing them as a "blessing"
 // would be misleading. Cheap enough to recompute every frame.
 function syncBlessingsUI() {
   const tags = [];
@@ -285,6 +285,24 @@ function syncBlessingsUI() {
     tags.push(game.unlocks.nextCount > 1
       ? `PSYCHIC ×${game.unlocks.nextCount}`
       : 'PSYCHIC');
+  }
+  // Banked Chisel / Fill consumables. Show the charge count so the
+  // player knows how many uses they have queued — drops off the list
+  // when fully spent.
+  if (game.unlocks.chiselCharges > 0) {
+    tags.push(game.unlocks.chiselCharges > 1
+      ? `CHISEL ×${game.unlocks.chiselCharges}`
+      : 'CHISEL');
+  }
+  if (game.unlocks.fillCharges > 0) {
+    tags.push(game.unlocks.fillCharges > 1
+      ? `FILL ×${game.unlocks.fillCharges}`
+      : 'FILL');
+  }
+  if (game.unlocks.flipCharges > 0) {
+    tags.push(game.unlocks.flipCharges > 1
+      ? `FLIP ×${game.unlocks.flipCharges}`
+      : 'FLIP');
   }
 
   blessingSection$.classList.toggle('hidden', tags.length === 0);
@@ -305,7 +323,7 @@ function syncCursesUI() {
   if (game.curses.hyped > 0) {
     tags.push(game.curses.hyped > 1 ? `HYPED ×${game.curses.hyped}` : 'HYPED');
   }
-  if (game.level <= game.curses.flexibleUntilLevel) tags.push('FLEXIBLE');
+  if (game.level <= game.curses.cruelUntilLevel) tags.push('CRUEL');
   if (game.curses.extraCols > 0) {
     tags.push(game.curses.extraCols > 1
       ? `GROWTH ×${game.curses.extraCols}`
@@ -331,10 +349,10 @@ game.onPerfectClear = ()    => notify('PERFECT CLEAR', 'perfect', 2100);
 game.onPowerUpChoice  = ()  => showNextChoice();
 // When the chisel animation finishes, dispatch any deferred menu.
 game.onChiselComplete = ()  => showNextChoice();
-// Polish runs through the same menu-deferral flow. It fires either at
+// Fill runs through the same menu-deferral flow. It fires either at
 // the end of the materialize animation (no line cleared) OR after a
-// polish-triggered line-clear animation completes.
-game.onPolishComplete = ()  => showNextChoice();
+// fill-triggered line-clear animation completes.
+game.onFillComplete = ()  => showNextChoice();
 // Junk-curse FX: small notification so the row drop doesn't feel silent.
 game.onJunk           = (n) => notify(n > 1 ? `JUNK +${n}` : 'JUNK', 'b2b', 1400);
 game.onRain           = (n) => notify(n > 1 ? `RAIN +${n}` : 'RAIN', 'b2b', 1300);
@@ -345,7 +363,7 @@ setupInput(game, {
   onResume: hideOverlay,
 });
 
-// -------- Chisel / Polish power-ups — pick a cell on the board --------
+// -------- Chisel / Fill power-ups — pick a cell on the board --------
 // Translate a click on the board canvas into a (col, row) and let
 // the Game decide whether the cell is a valid target for whichever
 // power-up is currently active. We do nothing otherwise so normal
@@ -370,9 +388,9 @@ board$.addEventListener('click', (e) => {
     game.chiselSelect(col, row);
     return;
   }
-  if (game.polish.active) {
+  if (game.fill.active) {
     const { col, row } = boardClickToCell(e);
-    game.polishSelect(col, row);
+    game.fillSelect(col, row);
     return;
   }
 });

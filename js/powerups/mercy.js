@@ -1,5 +1,6 @@
-// Power-up: Tetris — guarantees the next piece in the queue is the
-// I-piece (a "line piece"). Useful for setting up Tetris clears.
+// Power-up: Mercy — guarantees the next piece in the queue is the
+// I-piece (a "line piece"). Useful for setting up Tetris clears or
+// digging out of a tight stack.
 //
 // Implementation: unshift 'I' onto the queue. The next call to
 // spawnNext() will shift it off and spawn it as usual. This means
@@ -10,8 +11,8 @@
 // so the player can pick it again on later milestones.
 
 export default {
-  id: 'tetris',
-  name: 'Tetris',
+  id: 'mercy',
+  name: 'Mercy',
   description: 'Your next piece will be a line piece.',
   available: () => true,
   apply: (game) => { game.queue.unshift('I'); },

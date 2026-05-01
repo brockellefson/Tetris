@@ -1,33 +1,45 @@
-// Power-up: Chisel — remove a single 1×1 block of the player's choice.
+// Power-up: Chisel — grants a banked charge that lets the player
+// remove a single 1×1 block of their choice from the board.
 //
-// The interaction is split across three layers:
+// The interaction is split across four layers now:
 //
-//   1. apply()           — sets `game.chisel.active = true`. The Game's
-//                          tick() checks this flag and freezes gameplay
-//                          (no gravity, no input) until a block is picked.
+//   1. apply()           — bumps `game.unlocks.chiselCharges` (capped at
+//                          MAX_CHISEL_CHARGES). Picking the card no
+//                          longer freezes the game; the charge sits in
+//                          inventory until the player decides to spend it.
 //
-//   2. main.js click     — translates a canvas click into a (col, row)
-//                          and calls game.chiselSelect(col, row). If the
-//                          cell holds a locked block, that starts the
-//                          destruction animation (game.chisel.target).
+//   2. A keypress        — input.js calls game.tryActivateChisel(),
+//                          which spends one charge and sets
+//                          `game.chisel.active = true`. The Game's
+//                          tick() then freezes gameplay until the
+//                          player picks a block.
 //
-//   3. render.js         — paints a "click a block" prompt while
+//   3. main.js click /
+//      keyboard cursor   — translates the click or Enter into a
+//                          (col, row) and calls game.chiselSelect.
+//                          A real block starts the destruction
+//                          animation (`game.chisel.target`).
+//
+//   4. render.js         — paints a "click a block" prompt while
 //                          `chisel.active`, and the shatter animation
 //                          while `chisel.target` exists.
 //
-// Only available when there's at least one block on the board; otherwise
-// the player would be stuck with nothing to chisel.
+// Available until the player has banked the maximum number of charges.
+// We don't gate on board contents at pick time (charges persist across
+// many pieces, the board state at activation is what matters), so the
+// at-least-one-block check lives on tryActivateChisel() instead.
+
+import { MAX_CHISEL_CHARGES } from '../constants.js';
 
 export default {
   id: 'chisel',
   name: 'Chisel',
-  description: 'Remove a single 1×1 block of your choice from the board.',
-  available: (game) =>
-    game.board && game.board.some(row => row.some(cell => cell !== null)),
+  description: 'Bank a charge. Press A to remove any 1×1 block. Stacks up to 3.',
+  available: (game) => game.unlocks.chiselCharges < MAX_CHISEL_CHARGES,
   apply: (game) => {
-    game.chisel.active = true;
-    // Seed the keyboard cursor on a real block so arrow-key navigation
-    // and the on-board highlight have a sensible starting position.
-    game.chiselInitCursor();
+    game.unlocks.chiselCharges = Math.min(
+      MAX_CHISEL_CHARGES,
+      game.unlocks.chiselCharges + 1,
+    );
   },
 };

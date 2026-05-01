@@ -147,7 +147,7 @@ function getBgSprite(cols, rows) {
 }
 
 // Public wrapper: cached fast path for board cells. Falls back to
-// the raw painter for non-integer or one-off sizes (chisel/polish
+// the raw painter for non-integer or one-off sizes (chisel/fill
 // scaling animations).
 export function drawBlock(ctx, px, py, size, color, ghost = false) {
   // The chisel-shatter animation passes continuously varying
@@ -287,22 +287,22 @@ export function drawBoard(ctx, canvas, game) {
     drawChiselShatter(ctx, game.chisel.target, game.chiselProgress());
   }
 
-  // Polish materialize animation (the new POLISH cell is already drawn
+  // Fill materialize animation (the new FILL cell is already drawn
   // by the locked-blocks pass above; this just adds the FX overlay).
-  if (game.polish?.target) {
-    drawPolishShimmer(ctx, game.polish.target, game.polishProgress());
+  if (game.fill?.target) {
+    drawFillShimmer(ctx, game.fill.target, game.fillProgress());
   }
 
   if (!game.current || game.gameOver) {
-    // Still paint the chisel/polish cursor highlight even when there's
+    // Still paint the chisel/fill cursor highlight even when there's
     // no active piece (e.g. between spawns). Late-return path.
     if (game.chisel?.active && game.chisel.cursor) {
       const onBlock = !!game.board[game.chisel.cursor.y]?.[game.chisel.cursor.x];
       drawChiselCursor(ctx, game.chisel.cursor, onBlock);
     }
-    if (game.polish?.active && game.polish.cursor) {
-      const onEmpty = !game.board[game.polish.cursor.y]?.[game.polish.cursor.x];
-      drawPolishCursor(ctx, game.polish.cursor, onEmpty);
+    if (game.fill?.active && game.fill.cursor) {
+      const onEmpty = !game.board[game.fill.cursor.y]?.[game.fill.cursor.x];
+      drawFillCursor(ctx, game.fill.cursor, onEmpty);
     }
     return;
   }
@@ -339,16 +339,16 @@ export function drawBoard(ctx, canvas, game) {
     drawChiselCursor(ctx, game.chisel.cursor, onBlock);
   }
 
-  // Polish keyboard-cursor highlight — same drawn-last rule. Polish is
+  // Fill keyboard-cursor highlight — same drawn-last rule. Fill is
   // the inverse of chisel: green when the cursor is on an empty cell
-  // (Enter will polish it), red when over a filled cell or a cell
+  // (Enter will fill it), red when over a filled cell or a cell
   // currently occupied by the active piece.
-  if (game.polish?.active && game.polish.cursor) {
-    const cx = game.polish.cursor.x;
-    const cy = game.polish.cursor.y;
+  if (game.fill?.active && game.fill.cursor) {
+    const cx = game.fill.cursor.x;
+    const cy = game.fill.cursor.y;
     const onFilled = !!game.board[cy]?.[cx];
     const onPiece  = game.isCellUnderActivePiece?.(cx, cy) ?? false;
-    drawPolishCursor(ctx, game.polish.cursor, !onFilled && !onPiece);
+    drawFillCursor(ctx, game.fill.cursor, !onFilled && !onPiece);
   }
 }
 
@@ -480,14 +480,14 @@ function drawChiselCursor(ctx, cursor, onBlock) {
   ctx.restore();
 }
 
-// Polish materialize effect — the placed POLISH cell is drawn normally
+// Fill materialize effect — the placed FILL cell is drawn normally
 // by the locked-blocks pass; this overlays a fading white flash plus a
 // ring of sparkle particles converging *inward* (the visual opposite
 // of chisel's outward shrapnel) so the block reads as something
 // snapping into existence.
 //   target   { x, y, timer }
 //   progress 0..1
-function drawPolishShimmer(ctx, target, progress) {
+function drawFillShimmer(ctx, target, progress) {
   const cx = target.x * BLOCK + BLOCK / 2;
   const cy = target.y * BLOCK + BLOCK / 2;
 
@@ -525,12 +525,12 @@ function drawPolishShimmer(ctx, target, progress) {
   ctx.restore();
 }
 
-// Polish keyboard-cursor highlight — mirror of drawChiselCursor but
+// Fill keyboard-cursor highlight — mirror of drawChiselCursor but
 // with valid-target colors flipped (green = empty cell, red = filled
 // or under the active piece). The shape and pulse are intentionally
 // identical so the two power-ups feel like one selection mode in two
 // flavors.
-function drawPolishCursor(ctx, cursor, onEmpty) {
+function drawFillCursor(ctx, cursor, onEmpty) {
   const px = cursor.x * BLOCK;
   const py = cursor.y * BLOCK;
   const t = (Date.now() % 700) / 700;

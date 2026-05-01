@@ -13,13 +13,14 @@
 
 import {
   GRAVITY, DAS, ARR, SOFT, LINE_SCORES, CLEAR_DURATION, CHISEL_DURATION,
-  POLISH_DURATION,
+  FILL_DURATION,
   SHAKE_DURATION, SHAKE_LOCK, SHAKE_HARDDROP,
   B2B_MULTIPLIER, COMBO_BONUS, PERFECT_CLEAR_BONUS,
   LOCK_DELAY,
+  MAX_CHISEL_CHARGES, MAX_FILL_CHARGES, MAX_FLIP_CHARGES,
 } from './constants.js';
 import { newBoard, collides, lockPiece, findFullRows, removeRows } from './board.js';
-import { spawn, tryMove, tryRotate, ghostPosition } from './piece.js';
+import { spawn, tryMove, tryRotate, tryFlip, ghostPosition } from './piece.js';
 import { bagShuffle, shapeOf } from './pieces.js';
 
 export class Game {
@@ -75,6 +76,16 @@ export class Game {
       // letting the player make split-second adjustments. The timer
       // itself lives on `lockDelayTimer` below.
       slick:     false,
+      // Chisel / Fill are banked consumables. Picking the power-up
+      // adds a charge here (capped at MAX_*_CHARGES); pressing A / S
+      // spends one to enter the cell-pick interaction. Charges persist
+      // across pieces and clears so the player can save them for the
+      // exact wrong-block moment that needs them.
+      chiselCharges: 0,
+      fillCharges: 0,
+      // Flip — banked horizontal mirror of the active piece.
+      // Pressing F spends one. Capped at MAX_FLIP_CHARGES.
+      flipCharges: 0,
     };
     // Slick power-up timer. Counts up while the active piece is grounded
     // and Slick is unlocked; cleared on successful move/rotate, on spawn,
@@ -96,13 +107,13 @@ export class Game {
     //                         onto the board; flag is mostly used for HUD.
     //   hyped               — gravity-table offset added to (level - 1).
     //                         Stacks on each pick. 0 = normal speed.
-    //   flexibleUntilLevel  — while game.level <= this, the bag excludes
-    //                         I-pieces. Picking Flexible sets it to the
+    //   cruelUntilLevel  — while game.level <= this, the bag excludes
+    //                         I-pieces. Picking Cruel sets it to the
     //                         current level → curse expires next level-up.
     this.curses = {
       junk: false,
       hyped: 0,
-      flexibleUntilLevel: 0,
+      cruelUntilLevel: 0,
       // Growth — every pick widens the playfield by one column on the
       // right edge. Stacks (caps at +5). The board itself stores the
       // live width; this counter only drives the HUD tag and the
@@ -121,7 +132,7 @@ export class Game {
     //            navigate to any cell with arrow keys; only confirms
     //            when the cell holds a block. Null when chisel is idle.
     this.chisel = { active: false, target: null, cursor: null };
-    // Polish power-up state — a mirror of `chisel`, but for *placing* a
+    // Fill power-up state — a mirror of `chisel`, but for *placing* a
     // block on an empty cell instead of removing one.
     //   active      — gameplay is frozen waiting for the player to pick
     //                 an empty cell. Renderer paints a hint + cursor.
@@ -130,21 +141,89 @@ export class Game {
     //                 written to the board the instant it's picked.
     //   cursor      — {x, y} of the keyboard-driven cell selector.
     //                 Free-roams just like chisel.cursor.
-    //   savedPiece  — when a polish placement *completes a line*, we
+    //   savedPiece  — when a fill placement *completes a line*, we
     //                 hand off to the standard line-clear animation
     //                 (which expects current === null and would normally
     //                 spawnNext on completion). To preserve the active
-    //                 piece across a polish-triggered clear, we stash
+    //                 piece across a fill-triggered clear, we stash
     //                 it here and have completeClear() restore it
     //                 instead of spawning a fresh one.
-    this.polish = { active: false, target: null, cursor: null, savedPiece: null };
+    this.fill = { active: false, target: null, cursor: null, savedPiece: null };
     this.refillQueue();
   }
 
+  // Try to spend one chisel charge and enter the cell-pick interaction.
+  // Returns true on success, false if the keypress should be ignored.
+  // Refuses while gameplay is otherwise frozen (paused, game over,
+  // power-up menu open, line-clear or chisel/fill animation in
+  // progress, or a chisel/fill session already active) so the player
+  // can't double-spend or stall a clear animation. Also refuses on a
+  // fully empty board — there'd be nothing to chisel.
+  tryActivateChisel() {
+    if (!this.started) return false;
+    if (this.paused || this.gameOver) return false;
+    if (this.pendingChoices > 0) return false;
+    if (this.isClearing()) return false;
+    if (this.chisel.active || this.chisel.target) return false;
+    if (this.fill.active || this.fill.target) return false;
+    if (this.unlocks.chiselCharges <= 0) return false;
+    // No locked block on the board → activating would just hang the
+    // game waiting on a confirm that can't succeed. Refuse.
+    const hasBlock = this.board.some(row => row.some(cell => cell !== null));
+    if (!hasBlock) return false;
+    this.unlocks.chiselCharges -= 1;
+    this.chisel.active = true;
+    this.chiselInitCursor();
+    return true;
+  }
+
+  // Try to spend one Flip charge and horizontally mirror the active
+  // piece. Returns true on success. Refuses while gameplay is frozen,
+  // when there's no current piece, when the player has no charges, or
+  // when the mirrored shape would collide at the current position
+  // (player can move/rotate and try again — no charge spent).
+  tryActivateFlip() {
+    if (!this.started) return false;
+    if (this.paused || this.gameOver) return false;
+    if (this.pendingChoices > 0) return false;
+    if (this.isClearing()) return false;
+    if (this.chisel.active || this.chisel.target) return false;
+    if (this.fill.active || this.fill.target) return false;
+    if (this.unlocks.flipCharges <= 0) return false;
+    if (!this.current) return false;
+    const flipped = tryFlip(this.board, this.current);
+    if (!flipped) return false;
+    this.unlocks.flipCharges -= 1;
+    this.current = flipped;
+    // Treat a successful flip as a player adjustment — refresh the
+    // Slick lock-delay window so chaining flip + slide stays smooth.
+    this.lockDelayTimer = 0;
+    return true;
+  }
+
+  // Mirror of tryActivateChisel for fill. Same gating rules; the
+  // empty-cell check is the inverse — refuse if the board is fully
+  // packed (which would also imply game over, but we guard anyway).
+  tryActivateFill() {
+    if (!this.started) return false;
+    if (this.paused || this.gameOver) return false;
+    if (this.pendingChoices > 0) return false;
+    if (this.isClearing()) return false;
+    if (this.chisel.active || this.chisel.target) return false;
+    if (this.fill.active || this.fill.target) return false;
+    if (this.unlocks.fillCharges <= 0) return false;
+    const hasEmpty = this.board.some(row => row.some(cell => cell === null));
+    if (!hasEmpty) return false;
+    this.unlocks.fillCharges -= 1;
+    this.fill.active = true;
+    this.fillInitCursor();
+    return true;
+  }
+
   // Seed the chisel cursor on the topmost-leftmost filled cell so the
-  // highlight starts on a meaningful block. Called by the chisel power-up
-  // immediately after activating. Falls back to (0, 0) only if the board
-  // is somehow empty (the power-up's `available` guard prevents this).
+  // highlight starts on a meaningful block. Falls back to (0, 0) only
+  // if the board is somehow empty (tryActivateChisel guards against
+  // this, so the fallback should be unreachable in practice).
   chiselInitCursor() {
     const cols = this.board[0]?.length ?? 10;
     for (let r = 0; r < this.board.length; r++) {
@@ -177,41 +256,41 @@ export class Game {
     return this.chiselSelect(this.chisel.cursor.x, this.chisel.cursor.y);
   }
 
-  // Seed the polish cursor on the bottom-leftmost empty cell — most
-  // polish targets will be near the bottom of the stack (filling in
+  // Seed the fill cursor on the bottom-leftmost empty cell — most
+  // fill targets will be near the bottom of the stack (filling in
   // gaps to complete a line), so starting low minimizes travel.
   // Falls back to the spawn area if the board is somehow completely
   // full (the power-up's `available` guard makes this unlikely).
-  polishInitCursor() {
+  fillInitCursor() {
     const cols = this.board[0]?.length ?? 10;
     for (let r = this.board.length - 1; r >= 0; r--) {
       for (let c = 0; c < cols; c++) {
         if (!this.board[r][c]) {
-          this.polish.cursor = { x: c, y: r };
+          this.fill.cursor = { x: c, y: r };
           return;
         }
       }
     }
-    this.polish.cursor = { x: 0, y: 0 };
+    this.fill.cursor = { x: 0, y: 0 };
   }
 
-  // Move the polish cursor by (dx, dy), clamped to board bounds.
+  // Move the fill cursor by (dx, dy), clamped to board bounds.
   // Same free-roaming behavior as chiselMoveCursor.
-  polishMoveCursor(dx, dy) {
-    if (!this.polish.active || !this.polish.cursor) return;
+  fillMoveCursor(dx, dy) {
+    if (!this.fill.active || !this.fill.cursor) return;
     const cols = this.board[0]?.length ?? 10;
     const rows = this.board.length;
-    const nx = Math.max(0, Math.min(cols - 1, this.polish.cursor.x + dx));
-    const ny = Math.max(0, Math.min(rows - 1, this.polish.cursor.y + dy));
-    this.polish.cursor = { x: nx, y: ny };
+    const nx = Math.max(0, Math.min(cols - 1, this.fill.cursor.x + dx));
+    const ny = Math.max(0, Math.min(rows - 1, this.fill.cursor.y + dy));
+    this.fill.cursor = { x: nx, y: ny };
   }
 
-  // Keyboard-confirm the cursor cell. Defers to polishSelect, which
+  // Keyboard-confirm the cursor cell. Defers to fillSelect, which
   // returns false for filled cells (and cells under the active piece)
   // so misfires are harmless.
-  polishConfirm() {
-    if (!this.polish.active || !this.polish.cursor) return false;
-    return this.polishSelect(this.polish.cursor.x, this.polish.cursor.y);
+  fillConfirm() {
+    if (!this.fill.active || !this.fill.cursor) return false;
+    return this.fillSelect(this.fill.cursor.x, this.fill.cursor.y);
   }
 
   // Apply a chosen power-up. Decrements the pending count so the next
@@ -334,7 +413,7 @@ export class Game {
   }
 
   // True iff (x, y) is one of the cells currently occupied by the
-  // active piece. Used by polishSelect to refuse placement under the
+  // active piece. Used by fillSelect to refuse placement under the
   // active piece — placing a locked block where a piece already lives
   // would either trap the player or force an instant game-over.
   isCellUnderActivePiece(x, y) {
@@ -349,41 +428,41 @@ export class Game {
     return false;
   }
 
-  // Player picked an empty cell to polish. Returns true if the click
+  // Player picked an empty cell to fill. Returns true if the click
   // hit a valid (empty, not under active piece) cell; false otherwise
   // so the UI can ignore the click and let the player try again.
-  // The block is written to the board immediately as type 'POLISH';
-  // the timer on polish.target only drives the materialize visual.
-  polishSelect(x, y) {
-    if (!this.polish.active) return false;
+  // The block is written to the board immediately as type 'FILL';
+  // the timer on fill.target only drives the materialize visual.
+  fillSelect(x, y) {
+    if (!this.fill.active) return false;
     if (x < 0 || x >= this.board[0].length || y < 0 || y >= this.board.length) return false;
     if (this.board[y][x]) return false;        // already filled — no-op
     if (this.isCellUnderActivePiece(x, y)) return false; // would trap the active piece
-    this.board[y][x] = 'POLISH';
-    this.polish.active = false;
-    this.polish.cursor = null;
-    this.polish.target = { x, y, timer: 0 };
-    this.onPolishHit?.();                       // optional FX hook
+    this.board[y][x] = 'FILL';
+    this.fill.active = false;
+    this.fill.cursor = null;
+    this.fill.target = { x, y, timer: 0 };
+    this.onFillHit?.();                       // optional FX hook
     return true;
   }
 
-  // Called from tick() once the polish materialize animation finishes.
+  // Called from tick() once the fill materialize animation finishes.
   // Checks whether the new block completed any rows; if so, kicks off
   // the standard line-clear animation. The active piece is preserved
-  // across the clear — see `polish.savedPiece` in reset().
-  polishComplete() {
-    this.polish.target = null;
+  // across the clear — see `fill.savedPiece` in reset().
+  fillComplete() {
+    this.fill.target = null;
     const fullRows = findFullRows(this.board);
     if (fullRows.length === 0) {
       // No clear → just resume play. Notify main.js so any deferred
       // power-up / curse menu can finally surface.
-      this.onPolishComplete?.();
+      this.onFillComplete?.();
       return;
     }
     // Hand off to the standard clear flow. Hide the current piece so
     // completeClear()'s spawnNext() doesn't fire on an active piece;
-    // we'll restore it from polish.savedPiece in completeClear().
-    this.polish.savedPiece = this.current;
+    // we'll restore it from fill.savedPiece in completeClear().
+    this.fill.savedPiece = this.current;
     this.current = null;
     this.clearingRows = fullRows;
     this.clearTimer = 0;
@@ -427,10 +506,10 @@ export class Game {
     return Math.min(1, this.chisel.target.timer / CHISEL_DURATION);
   }
 
-  // Polish-materialize animation progress 0..1, or null if no target.
-  polishProgress() {
-    if (!this.polish.target) return null;
-    return Math.min(1, this.polish.target.timer / POLISH_DURATION);
+  // Fill-materialize animation progress 0..1, or null if no target.
+  fillProgress() {
+    if (!this.fill.target) return null;
+    return Math.min(1, this.fill.target.timer / FILL_DURATION);
   }
 
   start() {
@@ -447,11 +526,11 @@ export class Game {
   // -------- Piece management --------
 
   refillQueue() {
-    // While the Flexible curse is active for this level, exclude I-pieces
+    // While the Cruel curse is active for this level, exclude I-pieces
     // from the bag. The bag is re-evaluated every refill, so as soon as
-    // the player levels past `flexibleUntilLevel` the I-piece returns.
+    // the player levels past `cruelUntilLevel` the I-piece returns.
     while (this.queue.length < 7) {
-      const allowI = this.level > this.curses.flexibleUntilLevel;
+      const allowI = this.level > this.curses.cruelUntilLevel;
       this.queue.push(...bagShuffle(allowI));
     }
   }
@@ -626,17 +705,17 @@ export class Game {
 
     this.clearingRows = [];
     this.clearTimer = 0;
-    // If this clear was triggered by Polish (rather than a piece lock),
+    // If this clear was triggered by Fill (rather than a piece lock),
     // the player still has an active piece on screen — we stashed it in
-    // polish.savedPiece in polishComplete(). Restore it instead of
+    // fill.savedPiece in fillComplete(). Restore it instead of
     // spawning a fresh one. If the saved piece happens to overlap a
     // block left behind in a non-cleared row, that's a legitimate game
     // over (same rule as spawn-collision elsewhere).
-    if (this.polish.savedPiece) {
-      this.current = this.polish.savedPiece;
-      this.polish.savedPiece = null;
+    if (this.fill.savedPiece) {
+      this.current = this.fill.savedPiece;
+      this.fill.savedPiece = null;
       if (collides(this.board, this.current)) this.gameOver = true;
-      this.onPolishComplete?.();
+      this.onFillComplete?.();
     } else {
       this.spawnNext();
     }
@@ -690,16 +769,16 @@ export class Game {
       return;
     }
 
-    // Polish: same shape as chisel — frozen while waiting for the
+    // Fill: same shape as chisel — frozen while waiting for the
     // player to pick a cell, frozen-but-animating while the
-    // materialize effect plays. polishComplete() runs the line-clear
+    // materialize effect plays. fillComplete() runs the line-clear
     // check (which may itself kick off the standard clear animation
     // flow handled below).
-    if (this.polish.active) return;
-    if (this.polish.target) {
-      this.polish.target.timer += dt;
-      if (this.polish.target.timer >= POLISH_DURATION) {
-        this.polishComplete();
+    if (this.fill.active) return;
+    if (this.fill.target) {
+      this.fill.target.timer += dt;
+      if (this.fill.target.timer >= FILL_DURATION) {
+        this.fillComplete();
       }
       return;
     }

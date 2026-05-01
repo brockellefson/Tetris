@@ -82,7 +82,7 @@ export const KICKS_I = {
 // 7-bag randomizer: shuffles all 7 piece types, guaranteeing
 // each appears once per cycle. Eliminates unfair piece droughts.
 //
-// `allowI` lets the caller exclude I-pieces, which the "Flexible"
+// `allowI` lets the caller exclude I-pieces, which the "Cruel"
 // curse uses to forbid line pieces for a level. The resulting
 // 6-piece bag preserves the rest of the bag's fairness guarantees.
 export function bagShuffle(allowI = true) {
@@ -96,7 +96,29 @@ export function bagShuffle(allowI = true) {
   return bag;
 }
 
-// Returns the 2D shape matrix for a piece's current rotation.
+// Memoized horizontal mirror of every (type, rot) shape. Built lazily
+// the first time the Flip power-up flips a piece of that orientation;
+// subsequent collisions/renders read from the cache so we never reverse
+// rows in a hot path.
+const _mirrorCache = new Map();
+function mirrorShape(type, rot) {
+  const key = `${type}|${rot}`;
+  let m = _mirrorCache.get(key);
+  if (m) return m;
+  // Reverse each row (left-right flip). The matrix dimensions are
+  // unchanged, so the piece's bounding box stays the same — that
+  // keeps the SRS rotation kicks valid even after a flip.
+  m = PIECES[type][rot].map(row => row.slice().reverse());
+  _mirrorCache.set(key, m);
+  return m;
+}
+
+// Returns the 2D shape matrix for a piece's current rotation. If the
+// piece carries a `flipped` flag (set by the Flip power-up), returns
+// the horizontally-mirrored shape instead. Every consumer (collides,
+// lockPiece, renderer) goes through this function, so flipping is
+// transparent to the rest of the engine.
 export function shapeOf(piece) {
+  if (piece.flipped) return mirrorShape(piece.type, piece.rot);
   return PIECES[piece.type][piece.rot];
 }

@@ -18,10 +18,10 @@ export const COLORS = {
   // "Junk" curse. Picked to read as inert rubble next to the saturated
   // tetromino palette without clashing with the cyan/red UI accents.
   JUNK:  '#6b7080',
-  // POLISH is a pearly chrome used for the 1×1 block dropped by the
-  // "Polish" power-up. Light + neutral so it reads as something you
+  // FILL is a pearly chrome used for the 1×1 block dropped by the
+  // "Fill" power-up. Light + neutral so it reads as something you
   // (the player) added rather than another tetromino.
-  POLISH: '#dadbe4',
+  FILL: '#dadbe4',
   GHOST: 'rgba(255,255,255,0.15)',
   GRID:  '#1a1d28',
   BG:    '#0e1018',
@@ -63,10 +63,10 @@ export const CLEAR_DURATION = 280;
 // player can see the block break apart before play resumes.
 export const CHISEL_DURATION = 420;
 
-// Duration of the Polish power-up's block-materialize animation.
+// Duration of the Fill power-up's block-materialize animation.
 // Mirrors CHISEL_DURATION but kept independently so the two effects
 // can be tuned to feel like opposites (destruction vs. construction).
-export const POLISH_DURATION = 360;
+export const FILL_DURATION = 360;
 
 // Board-shake on piece lock — pixels of max displacement & duration.
 // SHAKE_LOCK is for natural / soft-drop locks; hard drops scale up
@@ -74,6 +74,19 @@ export const POLISH_DURATION = 360;
 export const SHAKE_DURATION = 220;
 export const SHAKE_LOCK     = 2;
 export const SHAKE_HARDDROP = 4;
+
+// Chisel and Fill are now banked consumables. Picking the power-up
+// card grants a charge; the player spends a charge by pressing A
+// (chisel) or S (fill). Each tops out at 3 charges — once the
+// player is at max, the corresponding card no longer surfaces in
+// the choice menu (see `available` on those power-ups).
+export const MAX_CHISEL_CHARGES = 3;
+export const MAX_FILL_CHARGES = 3;
+
+// Flip — banked consumable that horizontally mirrors the active
+// piece. Pressing F spends one charge. Same 3-charge cap as
+// Chisel and Fill.
+export const MAX_FLIP_CHARGES = 3;
 
 // Slick power-up — milliseconds a grounded piece can sit before locking,
 // giving the player a window to make split-second adjustments. The timer

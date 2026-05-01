@@ -14,9 +14,10 @@
 import hold     from './hold.js';
 import ghost    from './ghost.js';
 import { next1, next2, next3, next4, next5 } from './psychic.js';
-import tetris    from './tetris.js';
+import mercy     from './mercy.js';
 import chisel    from './chisel.js';
-import polish    from './polish.js';
+import fill      from './fill.js';
+import flip      from './flip.js';
 import tired     from './tired.js';
 import slick     from './slick.js';
 
@@ -28,9 +29,10 @@ export const ALL_POWERUPS = [
   next3,
   next4,
   next5,
-  tetris,
+  mercy,
   chisel,
-  polish,
+  fill,
+  flip,
   tired,
   slick,
 ];

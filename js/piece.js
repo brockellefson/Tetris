@@ -16,13 +16,32 @@ import { KICKS_JLSTZ, KICKS_I } from './pieces.js';
 import { collides } from './board.js';
 
 // Create a fresh piece at its standard spawn position.
+//   flipped — false by default. The Flip power-up toggles this flag
+//             on the active piece; shapeOf() returns the mirrored
+//             matrix when it's true. Flips don't carry across
+//             pieces, so spawn always starts un-flipped.
 export function spawn(type) {
   return {
     type,
     rot: 0,
     x: type === 'O' ? 4 : 3,   // O is 2 wide, others spawn at column 3
     y: type === 'I' ? -1 : 0,  // I spawns one row higher
+    flipped: false,
   };
+}
+
+// Try to horizontally mirror a piece in place. Returns the new piece
+// if the mirrored shape fits at the same (x, y); null if the flip
+// would clip a wall or overlap a locked block. The Game refunds
+// nothing on null — the caller decides whether to spend a charge.
+//
+// We don't try SRS-style kicks here because flips are a player-
+// initiated power-up; if the position is too tight, the player can
+// move/rotate first and try again. Keeping it kick-less also makes
+// the interaction feel deterministic.
+export function tryFlip(board, piece) {
+  const test = { ...piece, flipped: !piece.flipped };
+  return collides(board, test) ? null : test;
 }
 
 // Try to translate a piece by (dx, dy). Returns the new piece, or null.

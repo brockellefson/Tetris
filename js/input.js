@@ -14,8 +14,16 @@
 //   Z           rotate counter-clockwise
 //   Space       hard drop
 //   C / Shift   hold
+//   A           spend a Chisel charge (if banked)
+//   S           spend a Fill charge (if banked)
+//   F           spend a Flip charge (if banked) — mirrors the active piece
 //   P           pause
 //   R           restart
+//
+// Note: while a chisel or fill session is active, A/S/W/D shift
+// the on-board cursor for the cell pick (handled in the early-return
+// branch below). The "spend a charge" binding only fires from the
+// normal-gameplay switch at the bottom.
 // ============================================================
 
 export function setupInput(game, callbacks = {}) {
@@ -99,42 +107,42 @@ export function setupInput(game, callbacks = {}) {
       return;
     }
 
-    // Polish power-up: same UX surface as chisel. Gameplay keys are
-    // inert while polish.active or polish.target is set, and the
-    // arrow / WASD cursor is driven through game.polishMoveCursor.
-    if (game.polish.active || game.polish.target) {
+    // Fill power-up: same UX surface as chisel. Gameplay keys are
+    // inert while fill.active or fill.target is set, and the
+    // arrow / WASD cursor is driven through game.fillMoveCursor.
+    if (game.fill.active || game.fill.target) {
       if (e.key === 'r' || e.key === 'R') {
         e.preventDefault();
         game.start();
         callbacks.onStart?.();
         return;
       }
-      if (game.polish.active) {
+      if (game.fill.active) {
         switch (e.key) {
           case 'ArrowLeft':
           case 'a': case 'A':
             e.preventDefault();
-            game.polishMoveCursor(-1, 0);
+            game.fillMoveCursor(-1, 0);
             return;
           case 'ArrowRight':
           case 'd': case 'D':
             e.preventDefault();
-            game.polishMoveCursor(1, 0);
+            game.fillMoveCursor(1, 0);
             return;
           case 'ArrowUp':
           case 'w': case 'W':
             e.preventDefault();
-            game.polishMoveCursor(0, -1);
+            game.fillMoveCursor(0, -1);
             return;
           case 'ArrowDown':
           case 's': case 'S':
             e.preventDefault();
-            game.polishMoveCursor(0, 1);
+            game.fillMoveCursor(0, 1);
             return;
           case 'Enter':
           case ' ':
             e.preventDefault();
-            game.polishConfirm();
+            game.fillConfirm();
             return;
         }
       }
@@ -177,6 +185,27 @@ export function setupInput(game, callbacks = {}) {
       case 'Shift':
         e.preventDefault();
         game.holdPiece();
+        break;
+      case 'a': case 'A':
+        // Spend a banked Chisel charge. tryActivateChisel() refuses
+        // when the player has no charges, when gameplay is otherwise
+        // frozen, or when the board has nothing to chisel — so this
+        // keypress is safe to fire unconditionally.
+        e.preventDefault();
+        game.tryActivateChisel();
+        break;
+      case 's': case 'S':
+        // Spend a banked Fill charge. Same gating as Chisel.
+        e.preventDefault();
+        game.tryActivateFill();
+        break;
+      case 'f': case 'F':
+        // Spend a banked Flip charge — horizontally mirrors the
+        // active piece. tryActivateFlip() refuses (no charge spent)
+        // if there's no current piece or the mirrored shape would
+        // collide at the current position.
+        e.preventDefault();
+        game.tryActivateFlip();
         break;
       case 'p': case 'P':
         e.preventDefault();
