@@ -12,7 +12,7 @@
 // ============================================================
 
 import {
-  GRAVITY, DAS, ARR, SOFT, LINE_SCORES, CLEAR_DURATION,
+  GRAVITY, DAS, ARR, SOFT, LINE_SCORES, CLEAR_DURATION, CHISEL_DURATION,
   SHAKE_DURATION, SHAKE_LOCK, SHAKE_HARDDROP,
   B2B_MULTIPLIER, COMBO_BONUS, PERFECT_CLEAR_BONUS,
 } from './constants.js';
@@ -58,7 +58,50 @@ export class Game {
     //   lastClearWasTetris — for the back-to-back bonus.
     this.combo              = 0;
     this.lastClearWasTetris = false;
+    // Roguelite power-up state.
+    //   unlocks         — which features the player has unlocked.
+    //                     Power-ups (in js/powerups/) flip these flags.
+    //   pendingChoices  — number of unspent power-up choices. While > 0,
+    //                     the game freezes (handled in tick()) so the
+    //                     UI can show a choice menu.
+    this.unlocks = {
+      hold:      false,
+      ghost:     false,
+      nextCount: 0,
+    };
+    this.pendingChoices = 0;
+    // Chisel power-up state.
+    //   active — set by the Chisel power-up's apply(); freezes gameplay
+    //            and tells the renderer/UI to await a block click.
+    //   target — once a block is picked, holds {x, y, type, timer} while
+    //            the destruction animation plays. The block is removed
+    //            from the board the instant it's picked; `type` is kept
+    //            around purely so the animation can use the right color.
+    this.chisel = { active: false, target: null };
     this.refillQueue();
+  }
+
+  // Apply a chosen power-up. Decrements the pending count so the next
+  // queued choice (if any) can be presented.
+  applyPowerUp(powerup) {
+    powerup.apply(this);
+    this.pendingChoices = Math.max(0, this.pendingChoices - 1);
+  }
+
+  // Player picked a block to chisel out. Returns true if the click hit
+  // a filled cell; false (and no state change) otherwise so the UI can
+  // ignore the click. The block is removed immediately — the timer on
+  // chisel.target only drives the visual shatter effect.
+  chiselSelect(x, y) {
+    if (!this.chisel.active) return false;
+    if (x < 0 || x >= this.board[0].length || y < 0 || y >= this.board.length) return false;
+    const type = this.board[y][x];
+    if (!type) return false;                 // empty cell — let the player try again
+    this.board[y][x] = null;
+    this.chisel.active = false;
+    this.chisel.target = { x, y, type, timer: 0 };
+    this.onChiselHit?.();                    // optional FX hook
+    return true;
   }
 
   // Kick off a shake. Larger calls overwrite — hard drops will
@@ -90,6 +133,12 @@ export class Game {
   // Animation progress 0..1 — used by the renderer.
   clearProgress() {
     return Math.min(1, this.clearTimer / CLEAR_DURATION);
+  }
+
+  // Chisel-shatter animation progress 0..1, or null if no target.
+  chiselProgress() {
+    if (!this.chisel.target) return null;
+    return Math.min(1, this.chisel.target.timer / CHISEL_DURATION);
   }
 
   start() {
@@ -165,6 +214,7 @@ export class Game {
 
   holdPiece() {
     if (!this.current || !this.canHold) return;
+    if (!this.unlocks.hold) return; // gated behind a power-up
     const t = this.current.type;
     if (this.hold) {
       this.current = spawn(this.hold);
@@ -227,8 +277,18 @@ export class Game {
     const perfect = this.board.every(row => row.every(cell => cell === null));
     if (perfect) this.score += PERFECT_CLEAR_BONUS;
 
+    const linesBefore = this.lines;
     this.lines += cleared;
     this.level = Math.floor(this.lines / 10) + 1;
+
+    // Roguelite power-up milestone — every 5 lines earns a choice.
+    // (Max 1 per clear since clears top out at 4 lines.)
+    const milestonesEarned =
+      Math.floor(this.lines / 5) - Math.floor(linesBefore / 5);
+    if (milestonesEarned > 0) {
+      this.pendingChoices += milestonesEarned;
+      this.onPowerUpChoice?.(this.pendingChoices);
+    }
 
     // Visual / FX hooks — fired in importance order so the notification
     // stack reads top-to-bottom: PERFECT > TETRIS/B2B > COMBO.
@@ -272,6 +332,22 @@ export class Game {
 
   tick(dt) {
     if (!this.started || this.paused || this.gameOver) return;
+    // Freeze gameplay while a power-up choice is pending.
+    if (this.pendingChoices > 0) return;
+
+    // Chisel: while waiting for the player to pick a block, gameplay
+    // is frozen. While the destruction animation plays, gameplay is
+    // also frozen — but the timer must keep advancing so the animation
+    // ends. We update the timer here, then return early.
+    if (this.chisel.active) return;
+    if (this.chisel.target) {
+      this.chisel.target.timer += dt;
+      if (this.chisel.target.timer >= CHISEL_DURATION) {
+        this.chisel.target = null;
+        this.onChiselComplete?.();          // tells main.js to resume the menu queue
+      }
+      return;
+    }
 
     // Decay any active board shake (continues during line-clear animations).
     if (this.shakeIntensity > 0) {

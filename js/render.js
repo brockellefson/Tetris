@@ -167,18 +167,25 @@ export function drawBoard(ctx, canvas, game) {
     }
   }
 
+  // Chisel destruction animation (drawn on top of the locked blocks)
+  if (game.chisel?.target) {
+    drawChiselShatter(ctx, game.chisel.target, game.chiselProgress());
+  }
+
   if (!game.current || game.gameOver) return;
 
   const s = shapeOf(game.current);
   const gy = game.ghostY();
 
-  // ghost piece
-  for (let r = 0; r < s.length; r++) {
-    for (let c = 0; c < s[r].length; c++) {
-      if (!s[r][c]) continue;
-      const x = game.current.x + c;
-      const y = gy + r;
-      if (y >= 0) drawCell(ctx, x, y, COLORS[game.current.type], true);
+  // ghost piece — only if the player has unlocked the Predictor power-up
+  if (game.unlocks?.ghost) {
+    for (let r = 0; r < s.length; r++) {
+      for (let c = 0; c < s[r].length; c++) {
+        if (!s[r][c]) continue;
+        const x = game.current.x + c;
+        const y = gy + r;
+        if (y >= 0) drawCell(ctx, x, y, COLORS[game.current.type], true);
+      }
     }
   }
 
@@ -227,6 +234,60 @@ function drawClearOverlay(ctx, row, progress) {
       }
     }
   }
+}
+
+// Chisel destruction effect — block flashes white, expands, fades out,
+// and emits a ring of "shrapnel" particles flying outward.
+//   target   { x, y, type, timer }  (type → color)
+//   progress 0..1
+function drawChiselShatter(ctx, target, progress) {
+  const color = COLORS[target.type] || '#ffffff';
+  const cx = target.x * BLOCK + BLOCK / 2;
+  const cy = target.y * BLOCK + BLOCK / 2;
+
+  // 1. White flash overlay on the cell — fades out fast.
+  const flash = Math.max(0, 1 - progress * 1.6);
+  if (flash > 0) {
+    ctx.save();
+    ctx.fillStyle = `rgba(255, 255, 255, ${0.7 * flash})`;
+    ctx.fillRect(target.x * BLOCK, target.y * BLOCK, BLOCK, BLOCK);
+    ctx.restore();
+  }
+
+  // 2. The block itself, scaled up + faded out (uses drawBlock's gradient
+  //    look so the disappearing block matches the rest of the board).
+  const scale = 1 + progress * 0.6;
+  const alpha = Math.max(0, 1 - progress);
+  if (alpha > 0) {
+    const size = BLOCK * scale;
+    const px = cx - size / 2;
+    const py = cy - size / 2;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    drawBlock(ctx, px, py, size, color, false);
+    ctx.restore();
+  }
+
+  // 3. Shrapnel — 8 small chips fly outward from center, gravity-pulled.
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 8;
+  const N = 8;
+  const maxDist = BLOCK * 1.6;
+  for (let i = 0; i < N; i++) {
+    const angle = (i / N) * Math.PI * 2 + 0.2; // slight rotation so it doesn't look axis-aligned
+    const dist  = progress * maxDist;
+    const fx = cx + Math.cos(angle) * dist;
+    // little gravity pull-down on the y axis
+    const fy = cy + Math.sin(angle) * dist + progress * progress * BLOCK * 0.5;
+    const r  = Math.max(0.5, BLOCK * 0.12 * (1 - progress));
+    ctx.globalAlpha = Math.max(0, 1 - progress);
+    ctx.beginPath();
+    ctx.arc(fx, fy, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 // Render a single piece centered inside a small canvas (hold / next preview).

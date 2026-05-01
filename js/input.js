@@ -48,6 +48,26 @@ export function setupInput(game, callbacks = {}) {
       return;
     }
 
+    // Power-up choice menu open — game inputs are ignored.
+    // The menu owns its own keyboard listener (1/2/3) in main.js.
+    if (game.pendingChoices > 0) return;
+
+    // Chisel power-up: while waiting for a block click or while the
+    // shatter animation plays, gameplay keys are inert. R/P still work
+    // because they're allowed below — but they short-circuit on the
+    // Game side via paused/gameOver guards. Keep this minimal: just
+    // skip gameplay actions, not control keys like R/P.
+    if (game.chisel.active || game.chisel.target) {
+      // Allow R (restart) so a stuck player can recover; everything
+      // else falls through and is swallowed.
+      if (e.key === 'r' || e.key === 'R') {
+        e.preventDefault();
+        game.start();
+        callbacks.onStart?.();
+      }
+      return;
+    }
+
     switch (e.key) {
       case 'ArrowLeft':
         e.preventDefault();

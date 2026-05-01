@@ -10,7 +10,7 @@
   <div id="app">
     <div class="game">
       <div>
-        <div class="panel">
+        <div class="panel" id="hold-panel">
           <h2>Hold</h2>
           <canvas id="hold" class="mini" width="100" height="80"></canvas>
         </div>
@@ -40,7 +40,7 @@
       </div>
 
       <div>
-        <div class="panel">
+        <div class="panel" id="next-panel">
           <h2>Next</h2>
           <div class="next-list">
             <canvas class="mini next" width="120" height="80"></canvas>
@@ -51,6 +51,14 @@
           </div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Power-up choice menu — populated and shown by main.js -->
+  <div id="powerup-menu" class="hidden">
+    <div class="powerup-menu-inner">
+      <h2>CHOOSE A POWER-UP</h2>
+      <div class="powerup-cards" id="powerup-cards"></div>
     </div>
   </div>
 

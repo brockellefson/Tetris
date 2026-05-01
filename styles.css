@@ -161,3 +161,135 @@ canvas { display: block; }
   85%  { opacity: 1; transform: scale(1) translateY(0); }
   100% { opacity: 0; transform: scale(0.95) translateY(-24px); }
 }
+
+/* ======== Power-up choice menu ======== */
+#powerup-menu {
+  position: fixed;
+  inset: 0;
+  background: rgba(11, 13, 18, 0.82);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  animation: menu-fade 0.25s ease-out;
+}
+#powerup-menu.hidden { display: none; }
+
+.powerup-menu-inner { text-align: center; }
+
+.powerup-menu-inner h2 {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 5px;
+  margin-bottom: 28px;
+  color: #e6e6e6;
+  text-shadow: 0 0 12px rgba(0, 240, 240, 0.5);
+}
+
+.powerup-cards { display: flex; gap: 18px; justify-content: center; }
+
+.powerup-card {
+  background: #151821;
+  border: 1px solid #232838;
+  border-radius: 12px;
+  padding: 24px 18px;
+  width: 200px;
+  min-height: 220px;
+  cursor: pointer;
+  text-align: center;
+  color: #e6e6e6;
+  font-family: inherit;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+  animation: card-enter 0.35s cubic-bezier(0.2, 0.8, 0.3, 1) backwards;
+}
+.powerup-card:nth-child(1) { animation-delay: 0.00s; }
+.powerup-card:nth-child(2) { animation-delay: 0.06s; }
+.powerup-card:nth-child(3) { animation-delay: 0.12s; }
+
+.powerup-card:hover,
+.powerup-card:focus {
+  border-color: #00f0f0;
+  transform: translateY(-4px);
+  box-shadow: 0 0 24px rgba(0, 240, 240, 0.25);
+  outline: none;
+}
+
+.powerup-card-name {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: #00f0f0;
+  text-shadow: 0 0 10px currentColor;
+  margin-bottom: 14px;
+}
+
+.powerup-card-desc {
+  font-size: 13px;
+  line-height: 1.55;
+  color: #b0b6c4;
+  flex: 1;
+}
+
+.powerup-card-key {
+  margin-top: 16px;
+  font-size: 11px;
+  color: #7a8294;
+  letter-spacing: 1px;
+}
+.powerup-card-key kbd {
+  display: inline-block;
+  background: #232838;
+  color: #e6e6e6;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+@keyframes menu-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes card-enter {
+  from { opacity: 0; transform: translateY(20px) scale(0.92); }
+  to   { opacity: 1; transform: translateY(0)    scale(1);    }
+}
+
+/* ======== Chisel power-up ======== */
+/* While the player is choosing a block to chisel, the board takes
+   a crosshair cursor and shows a banner near the top.            */
+#board-wrap.chiseling { cursor: crosshair; }
+#board-wrap.chiseling #board { cursor: crosshair; }
+
+#chisel-hint {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(11, 13, 18, 0.78);
+  border: 1px solid #00f0f0;
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  color: #00f0f0;
+  text-shadow: 0 0 10px currentColor;
+  box-shadow: 0 0 20px rgba(0, 240, 240, 0.35);
+  pointer-events: none;
+  z-index: 6;
+  animation: chisel-pulse 1.4s ease-in-out infinite;
+}
+#chisel-hint.hidden { display: none; }
+
+@keyframes chisel-pulse {
+  0%, 100% { box-shadow: 0 0 14px rgba(0, 240, 240, 0.30); }
+  50%      { box-shadow: 0 0 28px rgba(0, 240, 240, 0.55); }
+}

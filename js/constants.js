@@ -52,6 +52,11 @@ export const PERFECT_CLEAR_BONUS = 3500;
 // flash + wipe outward from the center.
 export const CLEAR_DURATION = 280;
 
+// Duration of the Chisel power-up's block-shatter animation
+// (milliseconds). Game stays frozen for this whole window so the
+// player can see the block break apart before play resumes.
+export const CHISEL_DURATION = 420;
+
 // Board-shake on piece lock — pixels of max displacement & duration.
 // SHAKE_LOCK is for natural / soft-drop locks; hard drops scale up
 // with the drop distance (see Game.hardDrop).
