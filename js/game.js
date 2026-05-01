@@ -103,7 +103,7 @@ export class Game {
     // power-up card the player picks, they also accept its random
     // attached curse, so every upgrade has a cost.
     //   junk                — true once Junk has been picked. Picking the
-    //                         curse drops a one-time batch of 3-5 junk rows
+    //                         curse drops a one-time batch of 3 junk rows
     //                         onto the board; flag is mostly used for HUD.
     //   hyped               — gravity-table offset added to (level - 1).
     //                         Stacks on each pick. 0 = normal speed.
@@ -246,7 +246,12 @@ export class Game {
     const rows = this.board.length;
     const nx = Math.max(0, Math.min(cols - 1, this.chisel.cursor.x + dx));
     const ny = Math.max(0, Math.min(rows - 1, this.chisel.cursor.y + dy));
+    // Only fire the cursor-move hook when the position actually changed
+    // (clamping at a board edge means a keypress can be a no-op — and
+    // we don't want a UI tick for a no-op).
+    const moved = nx !== this.chisel.cursor.x || ny !== this.chisel.cursor.y;
     this.chisel.cursor = { x: nx, y: ny };
+    if (moved) this.onCursorMove?.();
   }
 
   // Keyboard-confirm the cursor cell. Defers to chiselSelect, which
@@ -282,7 +287,11 @@ export class Game {
     const rows = this.board.length;
     const nx = Math.max(0, Math.min(cols - 1, this.fill.cursor.x + dx));
     const ny = Math.max(0, Math.min(rows - 1, this.fill.cursor.y + dy));
+    // Match chiselMoveCursor — suppress the hook when clamping makes the
+    // press a no-op so we don't double-tick at the board edge.
+    const moved = nx !== this.fill.cursor.x || ny !== this.fill.cursor.y;
     this.fill.cursor = { x: nx, y: ny };
+    if (moved) this.onCursorMove?.();
   }
 
   // Keyboard-confirm the cursor cell. Defers to fillSelect, which
@@ -338,11 +347,11 @@ export class Game {
     }
   }
 
-  // Drops a random batch of 3-5 junk rows in one go. Stops early if
+  // Drops a batch of 3 junk rows in one go. Stops early if
   // the game already ended (so we don't keep mutating after game over).
   // Returns how many rows actually got placed so callers can drive UI.
   addJunkBatch() {
-    const count = 3 + Math.floor(Math.random() * 3); // 3, 4, or 5
+    const count = 3;
     let placed = 0;
     for (let i = 0; i < count; i++) {
       if (this.gameOver) break;

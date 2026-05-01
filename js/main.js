@@ -9,7 +9,7 @@
 import { Game } from './game.js';
 import { drawBoard, drawMini } from './render.js';
 import { setupInput } from './input.js';
-import { playLockSound, playClearSound } from './sound.js';
+import { playLockSound, playClearSound, playCycleSound, playSelectSound, playChiselSound, playFillSound } from './sound.js';
 import { pickChoices } from './powerups/index.js';
 import { pickCurseChoices } from './curses/index.js';
 import { COLS, ROWS, BLOCK } from './constants.js';
@@ -97,7 +97,14 @@ function buildChoiceMenu({ choices, onPick }) {
   });
 
   function setSelected(i) {
-    selected = ((i % choices.length) + choices.length) % choices.length;
+    const next = ((i % choices.length) + choices.length) % choices.length;
+    // Only play the cycle blip when the highlight actually moves. This
+    // suppresses the sound on the initial setSelected(0) call and on
+    // mouseenter events that re-target the already-selected card.
+    if (next !== selected) {
+      playCycleSound();
+    }
+    selected = next;
     cardEls.forEach((el, idx) => {
       el.classList.toggle('selected', idx === selected);
     });
@@ -147,6 +154,7 @@ function buildChoiceMenu({ choices, onPick }) {
 
   function pick(pair) {
     document.removeEventListener('keydown', onKey, { capture: true });
+    playSelectSound();
     powerupMenu$.classList.add('hidden');
     // Defer the actual apply by one frame. Belt-and-suspenders alongside
     // stopImmediatePropagation: even if a browser quirk lets the keystroke
@@ -343,6 +351,13 @@ function syncCursesUI() {
 const game = new Game();
 game.onLock         = playLockSound;
 game.onLineClear    = playClearSound;
+// Reuse the power-up menu cycle blip for chisel/fill cursor movement —
+// same UI-tick semantics, same sound.
+game.onCursorMove   = playCycleSound;
+// Confirm sounds for the actual chisel/fill placement — the hooks
+// fire in chiselSelect / fillSelect right after the board mutates.
+game.onChiselHit    = playChiselSound;
+game.onFillHit      = playFillSound;
 game.onCombo        = (n)   => notify(`COMBO × ${n}`, 'combo');
 game.onTetris       = (b2b) => notify(b2b ? 'BACK-TO-BACK TETRIS' : 'TETRIS', b2b ? 'b2b' : 'tetris', 1900);
 game.onPerfectClear = ()    => notify('PERFECT CLEAR', 'perfect', 2100);

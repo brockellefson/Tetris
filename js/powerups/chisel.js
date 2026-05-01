@@ -34,7 +34,7 @@ import { MAX_CHISEL_CHARGES } from '../constants.js';
 export default {
   id: 'chisel',
   name: 'Chisel',
-  description: 'Bank a charge. Press A to remove any 1×1 block. Stacks up to 3.',
+  description: 'Press A to remove any 1×1 block. Stacks up to 3.',
   available: (game) => game.unlocks.chiselCharges < MAX_CHISEL_CHARGES,
   apply: (game) => {
     game.unlocks.chiselCharges = Math.min(

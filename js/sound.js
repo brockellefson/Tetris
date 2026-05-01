@@ -93,6 +93,89 @@ const CLEAR_CHORDS = {
   4: [523.25, 659.25, 783.99, 880.00, 1046.50],     // C5 E G A C6   — TETRIS
 };
 
+// Short blippy "tick" played as the player cycles through power-up
+// cards. Always the same low C — a steady, neutral UI click that
+// stays out of the way of the select chime that follows. Very short
+// envelope so rapid arrow presses don't pile up.
+export function playCycleSound() {
+  const ac = getCtx();
+  const now = ac.currentTime;
+
+  const freq = PENTATONIC[0]; // C4
+
+  const env = ac.createGain();
+  env.gain.setValueAtTime(0, now);
+  env.gain.linearRampToValueAtTime(0.08, now + 0.005);
+  env.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+
+  // Light low-pass keeps it from being clicky.
+  const lpf = ac.createBiquadFilter();
+  lpf.type = 'lowpass';
+  lpf.frequency.value = 3200;
+  lpf.Q.value = 0.5;
+
+  const osc = ac.createOscillator();
+  osc.type = 'triangle';
+  osc.frequency.value = freq;
+
+  osc.connect(lpf);
+  lpf.connect(env);
+  env.connect(ac.destination);
+
+  osc.start(now);
+  osc.stop(now + 0.15);
+}
+
+// Confirmation chime played when the player picks a power-up card.
+// A quick ascending two-note arpeggio (C5 → G5) — recognizably
+// "decisive" without overpowering the gameplay sounds that follow.
+export function playSelectSound() {
+  const ac = getCtx();
+  const now = ac.currentTime;
+
+  const notes = [
+    { freq: 523.25, t: 0.00 },  // C5
+    { freq: 783.99, t: 0.06 },  // G5
+    { freq: 1046.50, t: 0.12 }, // C6
+  ];
+
+  const env = ac.createGain();
+  env.gain.setValueAtTime(0, now);
+  env.gain.linearRampToValueAtTime(0.14, now + 0.01);
+  env.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+
+  const lpf = ac.createBiquadFilter();
+  lpf.type = 'lowpass';
+  lpf.frequency.value = 3200;
+  lpf.Q.value = 0.7;
+  lpf.connect(env);
+  env.connect(ac.destination);
+
+  for (const { freq, t } of notes) {
+    // Pair of detuned sines per note for the same shimmer the clear
+    // sound uses — keeps the menu chime sonically related to the
+    // line-clear celebration without mimicking it.
+    const osc1 = ac.createOscillator();
+    osc1.type = 'sine';
+    osc1.frequency.value = freq;
+
+    const osc2 = ac.createOscillator();
+    osc2.type = 'sine';
+    osc2.frequency.value = freq * 1.005;
+    const detune = ac.createGain();
+    detune.gain.value = 0.5;
+
+    osc1.connect(lpf);
+    osc2.connect(detune);
+    detune.connect(lpf);
+
+    osc1.start(now + t);
+    osc2.start(now + t);
+    osc1.stop(now + t + 0.4);
+    osc2.stop(now + t + 0.4);
+  }
+}
+
 export function playClearSound(lineCount) {
   const ac = getCtx();
   const now = ac.currentTime;
@@ -136,4 +219,109 @@ export function playClearSound(lineCount) {
     osc1.stop(now + duration + 0.1);
     osc2.stop(now + duration + 0.1);
   }
+}
+
+// Sharp "crack" played when a chisel removes a block. A short bandpass
+// noise burst gives the chip-of-stone texture, and a fast downward
+// pitch sweep on a square wave adds the percussive "snap" so the cue
+// reads as breakage rather than just static.
+export function playChiselSound() {
+  const ac = getCtx();
+  const now = ac.currentTime;
+  const dur = 0.18;
+
+  // ----- Noise burst (the "chip") -----
+  // Build a short buffer of white noise and play it through a bandpass
+  // — bandpassing white noise around 3 kHz gives a crisp "tick"
+  // without the harshness of unfiltered noise.
+  const noiseBuf = ac.createBuffer(1, Math.floor(ac.sampleRate * dur), ac.sampleRate);
+  const data = noiseBuf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const noise = ac.createBufferSource();
+  noise.buffer = noiseBuf;
+
+  const noiseBP = ac.createBiquadFilter();
+  noiseBP.type = 'bandpass';
+  noiseBP.frequency.value = 3000;
+  noiseBP.Q.value = 1.2;
+
+  const noiseEnv = ac.createGain();
+  noiseEnv.gain.setValueAtTime(0.18, now);
+  noiseEnv.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+  noise.connect(noiseBP);
+  noiseBP.connect(noiseEnv);
+  noiseEnv.connect(ac.destination);
+
+  // ----- Pitched "snap" -----
+  // Square wave that drops from 800 Hz to 200 Hz in ~80 ms — the fast
+  // downward glide is what the ear reads as "something broke off."
+  const snap = ac.createOscillator();
+  snap.type = 'square';
+  snap.frequency.setValueAtTime(800, now);
+  snap.frequency.exponentialRampToValueAtTime(200, now + 0.08);
+
+  const snapLPF = ac.createBiquadFilter();
+  snapLPF.type = 'lowpass';
+  snapLPF.frequency.value = 1500;
+
+  const snapEnv = ac.createGain();
+  snapEnv.gain.setValueAtTime(0, now);
+  snapEnv.gain.linearRampToValueAtTime(0.12, now + 0.005);
+  snapEnv.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+
+  snap.connect(snapLPF);
+  snapLPF.connect(snapEnv);
+  snapEnv.connect(ac.destination);
+
+  noise.start(now);
+  noise.stop(now + dur);
+  snap.start(now);
+  snap.stop(now + 0.13);
+}
+
+// Soft low "thump" played when a fill power-up materializes a block.
+// A short sine drop from 220 Hz to 110 Hz reads as something solid
+// settling into place — opposite character from the chisel "crack."
+export function playFillSound() {
+  const ac = getCtx();
+  const now = ac.currentTime;
+  const dur = 0.22;
+
+  // Pitched body: A3 → A2 quick downward sweep on a sine. Lower than
+  // the lock sound so the player can tell them apart in a busy moment.
+  const body = ac.createOscillator();
+  body.type = 'sine';
+  body.frequency.setValueAtTime(220, now);
+  body.frequency.exponentialRampToValueAtTime(110, now + 0.09);
+
+  // Sub-octave sine for weight — gives the thump its body.
+  const sub = ac.createOscillator();
+  sub.type = 'sine';
+  sub.frequency.setValueAtTime(110, now);
+  sub.frequency.exponentialRampToValueAtTime(55, now + 0.09);
+  const subGain = ac.createGain();
+  subGain.gain.value = 0.5;
+
+  // Low-pass keeps it soft and rounded — no clicky high end.
+  const lpf = ac.createBiquadFilter();
+  lpf.type = 'lowpass';
+  lpf.frequency.value = 900;
+  lpf.Q.value = 0.6;
+
+  const env = ac.createGain();
+  env.gain.setValueAtTime(0, now);
+  env.gain.linearRampToValueAtTime(0.18, now + 0.008);
+  env.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+  body.connect(lpf);
+  sub.connect(subGain);
+  subGain.connect(lpf);
+  lpf.connect(env);
+  env.connect(ac.destination);
+
+  body.start(now);
+  sub.start(now);
+  body.stop(now + dur + 0.05);
+  sub.stop(now + dur + 0.05);
 }

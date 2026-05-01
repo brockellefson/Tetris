@@ -32,7 +32,7 @@ import { MAX_FLIP_CHARGES } from '../constants.js';
 export default {
   id: 'flip',
   name: 'Flip',
-  description: 'Bank a charge. Press F to mirror the active piece. Stacks up to 3.',
+  description: 'Press F to mirror the active piece. Stacks up to 3.',
   available: (game) => game.unlocks.flipCharges < MAX_FLIP_CHARGES,
   apply: (game) => {
     game.unlocks.flipCharges = Math.min(

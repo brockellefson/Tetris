@@ -42,7 +42,7 @@ import { MAX_FILL_CHARGES } from '../constants.js';
 export default {
   id: 'fill',
   name: 'Fill',
-  description: 'Bank a charge. Press S to fill any empty cell. Stacks up to 3.',
+  description: 'Press S to fill any empty cell. Stacks up to 3.',
   available: (game) => game.unlocks.fillCharges < MAX_FILL_CHARGES,
   apply: (game) => {
     game.unlocks.fillCharges = Math.min(
