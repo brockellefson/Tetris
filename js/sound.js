@@ -126,6 +126,58 @@ export function playCycleSound() {
   osc.stop(now + 0.15);
 }
 
+// Soft "whoosh chime" played when the power-up menu opens. A quick
+// upward filter sweep on a major-fifth dyad (C5 + G5) signals
+// "something arrived, your attention is needed" without sounding like
+// the decisive picked-a-card chime that comes later. Distinct from
+// playSelectSound (descending vs. ascending feel, no third note,
+// breathier filter envelope).
+export function playMenuOpenSound() {
+  const ac = getCtx();
+  const now = ac.currentTime;
+  const dur = 0.55;
+
+  // Master envelope — gentle swell up, slow tail.
+  const env = ac.createGain();
+  env.gain.setValueAtTime(0, now);
+  env.gain.linearRampToValueAtTime(0.11, now + 0.08);
+  env.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+  // Low-pass filter sweeps from dark → bright over the swell, giving
+  // the cue its "opening up" quality without a sharp transient.
+  const lpf = ac.createBiquadFilter();
+  lpf.type = 'lowpass';
+  lpf.Q.value = 0.7;
+  lpf.frequency.setValueAtTime(600, now);
+  lpf.frequency.exponentialRampToValueAtTime(3000, now + 0.25);
+  lpf.connect(env);
+  env.connect(ac.destination);
+
+  // Two stacked sines — root + perfect fifth. Each is doubled with a
+  // slight detune for a soft chorus shimmer (same trick as the clear
+  // sound, scaled down for UI use).
+  const dyad = [523.25, 783.99]; // C5, G5
+  for (const freq of dyad) {
+    const osc1 = ac.createOscillator();
+    osc1.type = 'sine';
+    osc1.frequency.value = freq;
+    osc1.connect(lpf);
+
+    const osc2 = ac.createOscillator();
+    osc2.type = 'sine';
+    osc2.frequency.value = freq * 1.005;
+    const detune = ac.createGain();
+    detune.gain.value = 0.5;
+    osc2.connect(detune);
+    detune.connect(lpf);
+
+    osc1.start(now);
+    osc2.start(now);
+    osc1.stop(now + dur + 0.05);
+    osc2.stop(now + dur + 0.05);
+  }
+}
+
 // Confirmation chime played when the player picks a power-up card.
 // A quick ascending two-note arpeggio (C5 → G5) — recognizably
 // "decisive" without overpowering the gameplay sounds that follow.

@@ -9,7 +9,7 @@
 import { Game } from './game.js';
 import { drawBoard, drawMini } from './render.js';
 import { setupInput } from './input.js';
-import { playLockSound, playClearSound, playCycleSound, playSelectSound, playChiselSound, playFillSound } from './sound.js';
+import { playLockSound, playClearSound, playCycleSound, playSelectSound, playMenuOpenSound, playChiselSound, playFillSound } from './sound.js';
 import { pickChoices } from './powerups/index.js';
 import { pickCurseChoices } from './curses/index.js';
 import { COLS, ROWS, BLOCK } from './constants.js';
@@ -169,6 +169,9 @@ function buildChoiceMenu({ choices, onPick }) {
   }
 
   powerupMenu$.classList.remove('hidden');
+  // Audible cue that the menu just appeared — distinct from the cycle
+  // blip and the select chime so it can't be confused with either.
+  playMenuOpenSound();
 }
 
 function showPowerUpMenu() {
