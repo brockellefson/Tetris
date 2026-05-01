@@ -21,9 +21,11 @@ export const COLORS = {
 
 // Gravity — milliseconds per cell drop, indexed by (level - 1).
 // Levels above the table length clamp to the last entry.
+// Curve starts at the old level-4 speed (473ms) so the early game
+// has a more engaging pace; original slow levels (1000/793/618) removed.
 export const GRAVITY = [
-  1000, 793, 618, 473, 355, 262, 190, 135, 94, 64,
-  43, 28, 18, 12, 8, 6, 4, 3, 2, 1, 1,
+  473, 355, 262, 190, 135, 94, 64, 43, 28, 18,
+  12, 8, 6, 4, 3, 2, 1, 1,
 ];
 
 // Input timing (milliseconds)
@@ -33,6 +35,17 @@ export const SOFT = 30;    // soft-drop fall interval
 
 // Score table for line clears (1, 2, 3, 4 lines), multiplied by level.
 export const LINE_SCORES = [0, 100, 300, 500, 800];
+
+// Bonus scoring rules.
+//   B2B_MULTIPLIER     — Tetris-after-Tetris pays 1.5× the base line score.
+//   COMBO_BONUS        — per cumulative line in the current clear streak,
+//                        awarded as COMBO_BONUS × totalLinesInStreak × level.
+//                        E.g. a double clear → combo 2 → +100 × level.
+//                        A Tetris then a single → combo 5 → +250 × level.
+//   PERFECT_CLEAR_BONUS — flat bonus when the board is empty after a clear.
+export const B2B_MULTIPLIER     = 1.5;
+export const COMBO_BONUS        = 50;
+export const PERFECT_CLEAR_BONUS = 3500;
 
 // Duration of the line-clear animation in milliseconds.
 // During this window, gameplay pauses and the cleared rows

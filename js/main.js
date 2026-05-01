@@ -19,9 +19,21 @@ const holdCtx       = hold$.getContext('2d');
 const nextCanvases  = [...document.querySelectorAll('.next')];
 const nextCtxs      = nextCanvases.map(c => c.getContext('2d'));
 const overlay       = document.getElementById('overlay');
+const notifs$       = document.getElementById('notifications');
 const scoreEl       = document.getElementById('score');
 const levelEl       = document.getElementById('level');
 const linesEl       = document.getElementById('lines');
+
+// -------- Floating notifications (combo / TETRIS / perfect clear) --------
+// CSS owns the animation; JS just appends the element and removes it
+// after the animation finishes. Multiple notifications stack vertically.
+function notify(text, type, duration = 1700) {
+  const el = document.createElement('div');
+  el.className = 'notification ' + type;
+  el.textContent = text;
+  notifs$.appendChild(el);
+  setTimeout(() => el.remove(), duration);
+}
 
 // -------- Overlay helpers --------
 function showOverlay(text, sub = '') {
@@ -34,8 +46,11 @@ function hideOverlay() {
 
 // -------- Boot --------
 const game = new Game();
-game.onLock      = playLockSound;
-game.onLineClear = playClearSound;
+game.onLock         = playLockSound;
+game.onLineClear    = playClearSound;
+game.onCombo        = (n)   => notify(`COMBO × ${n}`, 'combo');
+game.onTetris       = (b2b) => notify(b2b ? 'BACK-TO-BACK TETRIS' : 'TETRIS', b2b ? 'b2b' : 'tetris', 1900);
+game.onPerfectClear = ()    => notify('PERFECT CLEAR', 'perfect', 2100);
 
 setupInput(game, {
   onStart:  hideOverlay,

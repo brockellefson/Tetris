@@ -24,7 +24,7 @@ function getCtx() {
 }
 
 // Pentatonic scale (C major pentatonic). Any combination of these
-// notes is consonant, so cycling through them always sounds musical.
+// notes is consonant, so any random sequence sounds musical.
 const PENTATONIC = [
   261.63, // C4
   293.66, // D4
@@ -33,18 +33,16 @@ const PENTATONIC = [
   440.00, // A4
   523.25, // C5
 ];
-let noteIndex = 0;
 
 // Soft, warm tone played when a piece locks into the board.
-// Each call advances through the pentatonic so consecutive locks
-// form a gently rising melody — a nod to Tetris Effect's musical
-// feedback design where every action becomes part of the soundtrack.
+// Each call picks a random note from the pentatonic — the ear
+// hears the unpredictable sequence as a wandering, ambient melody
+// rather than a fixed pattern.
 export function playLockSound() {
   const ac = getCtx();
   const now = ac.currentTime;
 
-  const freq = PENTATONIC[noteIndex];
-  noteIndex = (noteIndex + 1) % PENTATONIC.length;
+  const freq = PENTATONIC[Math.floor(Math.random() * PENTATONIC.length)];
 
   // Master envelope — quick soft attack, long gentle decay.
   const env = ac.createGain();

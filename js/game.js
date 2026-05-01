@@ -14,6 +14,7 @@
 import {
   GRAVITY, DAS, ARR, SOFT, LINE_SCORES, CLEAR_DURATION,
   SHAKE_DURATION, SHAKE_LOCK, SHAKE_HARDDROP,
+  B2B_MULTIPLIER, COMBO_BONUS, PERFECT_CLEAR_BONUS,
 } from './constants.js';
 import { newBoard, collides, lockPiece, findFullRows, removeRows } from './board.js';
 import { spawn, tryMove, tryRotate, ghostPosition } from './piece.js';
@@ -49,6 +50,14 @@ export class Game {
     // read by main.js as a CSS transform on the canvas.
     this.shakeTimer     = 0;
     this.shakeIntensity = 0;
+    // Bonus-scoring state.
+    //   combo — cumulative number of LINES cleared in the current streak
+    //           (resets when a piece locks without clearing).
+    //           A single double-clear sets combo = 2.
+    //           A Tetris followed by a single sets combo = 5.
+    //   lastClearWasTetris — for the back-to-back bonus.
+    this.combo              = 0;
+    this.lastClearWasTetris = false;
     this.refillQueue();
   }
 
@@ -183,6 +192,9 @@ export class Game {
       this.current = null; // hide the piece; spawn deferred until clear completes
       this.onLineClear?.(fullRows.length); // fires at start of animation
     } else {
+      // No clear → combo broken. (B2B is preserved across non-clearing
+      // placements; only a non-Tetris clear breaks B2B.)
+      this.combo = 0;
       this.spawnNext();
     }
   }
@@ -191,9 +203,39 @@ export class Game {
   completeClear() {
     const cleared = this.clearingRows.length;
     removeRows(this.board, this.clearingRows);
-    this.score += LINE_SCORES[cleared] * this.level;
+
+    // Capture the B2B flag before we mutate state — needed for both the
+    // bonus calculation and the visual notification below.
+    const wasB2B = (cleared === 4 && this.lastClearWasTetris);
+
+    // Base line score (current level — level-up happens after).
+    let lineScore = LINE_SCORES[cleared] * this.level;
+    if (wasB2B) lineScore = Math.floor(lineScore * B2B_MULTIPLIER);
+    this.score += lineScore;
+
+    // Combo bonus: combo accumulates the actual line count, then awards
+    // COMBO_BONUS × combo × level. So a Tetris in a streak pays much
+    // more than a single, and chains of multi-line clears compound fast.
+    this.combo += cleared;
+    this.score += COMBO_BONUS * this.combo * this.level;
+
+    // Update B2B state. Only a Tetris keeps the chain alive — a Single,
+    // Double, or Triple breaks it.
+    this.lastClearWasTetris = (cleared === 4);
+
+    // Perfect Clear: flat bonus when the board is fully empty.
+    const perfect = this.board.every(row => row.every(cell => cell === null));
+    if (perfect) this.score += PERFECT_CLEAR_BONUS;
+
     this.lines += cleared;
     this.level = Math.floor(this.lines / 10) + 1;
+
+    // Visual / FX hooks — fired in importance order so the notification
+    // stack reads top-to-bottom: PERFECT > TETRIS/B2B > COMBO.
+    if (perfect)         this.onPerfectClear?.();
+    if (cleared === 4)   this.onTetris?.(wasB2B);
+    if (this.combo >= 2) this.onCombo?.(this.combo);
+
     this.clearingRows = [];
     this.clearTimer = 0;
     this.spawnNext();
