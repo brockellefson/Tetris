@@ -14,6 +14,28 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <!-- ============================================================
+       Synthwave background — sliced sun, wireframe mountains, and a
+       pink perspective grid that scrolls toward the viewer to fake
+       forward motion. Pure decoration; sits behind everything and
+       never catches input. The scanline overlay (body::after) and
+       the game UI (#app) both stack on top of this.
+       ============================================================ -->
+  <div id="synthwave-bg" aria-hidden="true">
+    <div class="sw-sun"></div>
+    <svg class="sw-mountains" viewBox="0 0 1200 220" preserveAspectRatio="xMidYMax slice">
+      <!-- Two soft layered ranges of rolling hills. Back layer is a
+           slightly lighter violet to suggest atmospheric depth; front
+           layer is the deepest blue-purple so it reads as foreground.
+           Both are smooth-curve silhouettes — no fills internally,
+           just dark domes against the sun. -->
+      <path class="sw-hills-back"  d="M0,220 C90,140 190,140 290,175 C400,110 510,110 620,165 C730,100 840,100 950,160 C1050,120 1150,125 1200,165 L1200,220 Z" />
+      <path class="sw-hills-front" d="M0,220 C140,185 250,160 400,195 C540,170 660,165 810,200 C950,180 1060,180 1200,205 L1200,220 Z" />
+    </svg>
+    <div class="sw-horizon-glow"></div>
+    <div class="sw-grid"></div>
+  </div>
+
   <div id="app">
     <div class="game">
       <div>

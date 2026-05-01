@@ -28,37 +28,19 @@
 
 html, body {
   height: 100%;
-  /* Sunset horizon — deep purple at the top fading down through
-     magenta toward a hot-pink "vanishing point" near the bottom.
-     Sits behind everything, including the playfield wrap.        */
-  background:
-    radial-gradient(ellipse 80% 55% at 50% 100%, rgba(255, 42, 146, 0.35) 0%, transparent 60%),
-    radial-gradient(ellipse 60% 40% at 50% 100%, rgba(176, 38, 255, 0.30) 0%, transparent 70%),
-    linear-gradient(180deg, #08001a 0%, #14002b 45%, #2a0044 80%, #4a0066 100%);
+  /* Deep, mostly-uniform violet sky — the sun and grid carry the
+     color story now, so the backdrop just needs to recede. A very
+     mild top-to-bottom shift keeps it from feeling flat.            */
+  background: linear-gradient(180deg,
+    #1a0033   0%,
+    #260047  45%,
+    #320058  80%,
+    #3a0066 100%);
   background-attachment: fixed;
   color: var(--text-bright);
   font-family: 'Orbitron', 'Rajdhani', -apple-system, BlinkMacSystemFont, sans-serif;
   user-select: none;
   overflow: hidden;
-}
-
-/* The grid floor — a single thin animated horizon line glowing along
-   the bottom edge to sell the "we're racing toward the sun" vibe.
-   Pure decoration; sits behind everything and never catches input.   */
-body::before {
-  content: '';
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 8%;
-  height: 2px;
-  background: linear-gradient(90deg, transparent 0%, var(--neon-pink) 50%, transparent 100%);
-  box-shadow:
-    0 0 12px var(--neon-pink),
-    0 0 30px var(--neon-pink),
-    0 0 60px var(--neon-violet);
-  pointer-events: none;
-  z-index: 0;
 }
 
 /* Subtle CRT scanlines layered over the whole viewport — barely
@@ -87,6 +69,167 @@ body::after {
   padding: 20px;
   position: relative;
   z-index: 2;
+}
+
+/* ============================================================
+   Synthwave background scene
+   ============================================================
+   Layered, pure-CSS/SVG outrun horizon. Three pieces:
+     1. .sw-sun           sliced gradient sun on the horizon
+     2. .sw-mountains     wireframe SVG ranges flanking the path
+     3. .sw-grid          perspective-tilted pink floor that scrolls
+                          toward the viewer to fake forward motion
+   Plus .sw-horizon-glow — the bright pink line where floor meets sky.
+
+   The horizon sits at 50% of the viewport. The sun, mountain bases,
+   and the far edge of the grid all align there.                     */
+
+#synthwave-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* ---- The sun ----
+   Big, dominating disc that sits on the horizon. Gradient runs from
+   soft yellow at the top straight into hot pink/magenta at the
+   bottom (no orange detour — keeps it firmly in the pink family
+   like the reference image). The ::after layer carves a few thin
+   horizontal "blinds" into the lower half — much subtler than the
+   classic Venetian-blind treatment. A slow pulse on the box-shadow
+   makes the bloom breathe.                                          */
+.sw-sun {
+  position: absolute;
+  bottom: 50%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: clamp(320px, 38vw, 480px);
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  background: linear-gradient(to bottom,
+    #ffe066   0%,
+    #ffc266  18%,
+    #ff8eb0  45%,
+    #ff3d8a  75%,
+    #ff0080 100%);
+  box-shadow:
+    0 0 80px  rgba(255, 200,  80, 0.45),
+    0 0 160px rgba(255,  60, 140, 0.50),
+    0 0 260px rgba(255,   0, 128, 0.40);
+  animation: sw-sun-pulse 6s ease-in-out infinite;
+}
+
+.sw-sun::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  /* Thin, widely-spaced bands — read as gentle striping rather than
+     hard blinds. Reduced opacity so the sun's gradient still shines
+     through.                                                       */
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0px,
+    transparent 28px,
+    rgba(26, 0, 51, 0.55) 28px,
+    rgba(26, 0, 51, 0.55) 32px
+  );
+  /* Mask the stripes so they only appear on the lower half of the sun. */
+  -webkit-mask: linear-gradient(to bottom, transparent 50%, black 58%);
+          mask: linear-gradient(to bottom, transparent 50%, black 58%);
+}
+
+@keyframes sw-sun-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 80px  rgba(255, 200,  80, 0.45),
+      0 0 160px rgba(255,  60, 140, 0.50),
+      0 0 260px rgba(255,   0, 128, 0.40);
+  }
+  50% {
+    box-shadow:
+      0 0 110px rgba(255, 200,  80, 0.65),
+      0 0 220px rgba(255,  60, 140, 0.65),
+      0 0 320px rgba(255,   0, 128, 0.55);
+  }
+}
+
+/* ---- Rolling-hill silhouettes ----
+   Two layered ranges of soft rounded hills. Filled silhouettes (no
+   stroke) — they read as the dark dunes the sun is setting behind.
+   Back layer is a slightly lighter violet so atmospheric depth is
+   implied; front layer goes nearly black-purple to push it forward. */
+.sw-mountains {
+  position: absolute;
+  bottom: 50%;
+  left: 0;
+  width: 100%;
+  height: 22%;
+  /* Pull the hills slightly down over the horizon line so their
+     bases blend cleanly into the start of the grid floor.        */
+  margin-bottom: -2px;
+}
+.sw-hills-back  { fill: #2d1448; }
+.sw-hills-front { fill: #150028; }
+
+/* ---- Horizon glow ----
+   Bright cyan line where the dark hills meet the start of the grid
+   floor — matches the new floor color and reads as the "horizon
+   light bleed" you see in the reference image.                    */
+.sw-horizon-glow {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 50%;
+  height: 2px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    var(--neon-cyan) 20%,
+    var(--neon-cyan) 80%,
+    transparent 100%);
+  box-shadow:
+    0 0 14px var(--neon-cyan),
+    0 0 32px var(--neon-cyan),
+    0 0 64px rgba(0, 245, 255, 0.6);
+  z-index: 2;
+}
+
+/* ---- Animated perspective grid floor ----
+   Same perspective trick as before, just recolored from pink to
+   cyan to match the reference. The flat 2D grid div is tilted into
+   3D space with `perspective() rotateX()`, transform-origin is the
+   top edge so the grid recedes upward into the distance, and the
+   background-image lines are scrolled in y to fake forward motion. */
+.sw-grid {
+  position: absolute;
+  bottom: 0;
+  left: -50%;
+  width: 200%;
+  height: 50%;
+  background-image:
+    linear-gradient(to right,  var(--neon-cyan) 2px, transparent 2px),
+    linear-gradient(to bottom, var(--neon-cyan) 2px, transparent 2px);
+  background-size: 90px 90px;
+  background-position: 0 0;
+  transform: perspective(420px) rotateX(62deg);
+  transform-origin: 50% 0%;
+  filter: drop-shadow(0 0 4px rgba(0, 245, 255, 0.65));
+  opacity: 0.85;
+  animation: sw-grid-scroll 2.6s linear infinite;
+}
+
+@keyframes sw-grid-scroll {
+  0%   { background-position: 0 0; }
+  100% { background-position: 0 90px; }
+}
+
+/* Respect users who've turned animations off — kill the grid scroll
+   and sun pulse so the page stays totally still. */
+@media (prefers-reduced-motion: reduce) {
+  .sw-grid { animation: none; }
+  .sw-sun  { animation: none; }
 }
 
 .game {

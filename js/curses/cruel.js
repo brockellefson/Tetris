@@ -16,7 +16,7 @@
 export default {
   id: 'curse-cruel',
   name: 'Cruel',
-  description: 'No line pieces for this level. Existing I-pieces leave the queue.',
+  description: 'No line pieces for this level.',
   available: () => true,
   apply: (game) => {
     game.curses.cruelUntilLevel = Math.max(

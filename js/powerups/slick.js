@@ -15,7 +15,7 @@
 export default {
   id: 'slick',
   name: 'Slick',
-  description: 'Pieces lock slightly later — make split-second adjustments before they settle.',
+  description: 'Pieces lock slightly later',
   available: (game) => !game.unlocks.slick,
   apply:     (game) => { game.unlocks.slick = true; },
 };

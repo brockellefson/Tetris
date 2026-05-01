@@ -15,7 +15,7 @@
 export default {
   id: 'hold',
   name: 'Hold',
-  description: 'Reveal the Hold slot. Press C or Shift to stash a piece for later.',
+  description: 'Press C or Shift to stash a piece for later.',
   available: (game) => !game.unlocks.hold,
   apply:     (game) => { game.unlocks.hold = true; },
 };

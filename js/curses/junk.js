@@ -9,7 +9,7 @@
 export default {
   id: 'curse-junk',
   name: 'Junk',
-  description: 'Drops 3-5 junk rows onto the board immediately. One-time hit.',
+  description: 'Drops 3-5 junk rows onto the board immediately.',
   available: () => true,
   apply: (game) => {
     game.curses.junk = true;

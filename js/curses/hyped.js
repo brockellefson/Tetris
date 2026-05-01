@@ -9,7 +9,7 @@
 export default {
   id: 'curse-hyped',
   name: 'Hyped',
-  description: 'Pieces fall one level faster — permanent and stackable.',
+  description: 'Pieces fall one level faster.',
   available: () => true,
   apply: (game) => { game.curses.hyped += 1; },
 };

@@ -13,7 +13,7 @@
 export default {
   id: 'tired',
   name: 'Tired',
-  description: 'Pieces fall one level slower — removes a stack of Hyped.',
+  description: 'Pieces fall one level slower',
   available: (game) => game.curses.hyped > 0,
   apply: (game) => { game.curses.hyped = Math.max(0, game.curses.hyped - 1); },
 };

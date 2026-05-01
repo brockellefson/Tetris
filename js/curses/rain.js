@@ -13,7 +13,7 @@
 export default {
   id: 'curse-rain',
   name: 'Rain',
-  description: 'A one-time downpour: 5-10 junk blocks rain down and stack on top of the pile.',
+  description: '5-10 junk blocks rain down and stack on top of the pile.',
   available: () => true,
   apply: (game) => {
     const placed = game.addRainBlocks();
