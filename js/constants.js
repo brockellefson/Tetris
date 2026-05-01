@@ -18,6 +18,10 @@ export const COLORS = {
   // "Junk" curse. Picked to read as inert rubble next to the saturated
   // tetromino palette without clashing with the cyan/red UI accents.
   JUNK:  '#6b7080',
+  // POLISH is a pearly chrome used for the 1×1 block dropped by the
+  // "Polish" power-up. Light + neutral so it reads as something you
+  // (the player) added rather than another tetromino.
+  POLISH: '#dadbe4',
   GHOST: 'rgba(255,255,255,0.15)',
   GRID:  '#1a1d28',
   BG:    '#0e1018',
@@ -58,6 +62,11 @@ export const CLEAR_DURATION = 280;
 // (milliseconds). Game stays frozen for this whole window so the
 // player can see the block break apart before play resumes.
 export const CHISEL_DURATION = 420;
+
+// Duration of the Polish power-up's block-materialize animation.
+// Mirrors CHISEL_DURATION but kept independently so the two effects
+// can be tuned to feel like opposites (destruction vs. construction).
+export const POLISH_DURATION = 360;
 
 // Board-shake on piece lock — pixels of max displacement & duration.
 // SHAKE_LOCK is for natural / soft-drop locks; hard drops scale up

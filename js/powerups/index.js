@@ -17,6 +17,7 @@ import { next1, next2, next3, next4, next5 } from './foresight.js';
 import { growth1, growth2, growth3, growth4, growth5 } from './growth-spurt.js';
 import tetris    from './tetris.js';
 import chisel    from './chisel.js';
+import polish    from './polish.js';
 
 export const ALL_POWERUPS = [
   memory,
@@ -33,6 +34,7 @@ export const ALL_POWERUPS = [
   growth5,
   tetris,
   chisel,
+  polish,
 ];
 
 // Pick up to `count` random eligible power-ups for the choice menu.

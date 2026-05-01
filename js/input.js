@@ -99,6 +99,48 @@ export function setupInput(game, callbacks = {}) {
       return;
     }
 
+    // Polish power-up: same UX surface as chisel. Gameplay keys are
+    // inert while polish.active or polish.target is set, and the
+    // arrow / WASD cursor is driven through game.polishMoveCursor.
+    if (game.polish.active || game.polish.target) {
+      if (e.key === 'r' || e.key === 'R') {
+        e.preventDefault();
+        game.start();
+        callbacks.onStart?.();
+        return;
+      }
+      if (game.polish.active) {
+        switch (e.key) {
+          case 'ArrowLeft':
+          case 'a': case 'A':
+            e.preventDefault();
+            game.polishMoveCursor(-1, 0);
+            return;
+          case 'ArrowRight':
+          case 'd': case 'D':
+            e.preventDefault();
+            game.polishMoveCursor(1, 0);
+            return;
+          case 'ArrowUp':
+          case 'w': case 'W':
+            e.preventDefault();
+            game.polishMoveCursor(0, -1);
+            return;
+          case 'ArrowDown':
+          case 's': case 'S':
+            e.preventDefault();
+            game.polishMoveCursor(0, 1);
+            return;
+          case 'Enter':
+          case ' ':
+            e.preventDefault();
+            game.polishConfirm();
+            return;
+        }
+      }
+      return;
+    }
+
     // Power-up / curse choice menu open — game inputs are ignored.
     // Each menu owns its own keyboard listener (arrows/Enter/1-2-3) in main.js.
     if (game.pendingChoices > 0) return;

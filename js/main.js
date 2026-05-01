@@ -190,8 +190,10 @@ function showNextChoice() {
   // Don't pop a modal post game-over (junk-curse can trigger game over
   // mid-completeClear, *before* the choice hooks fire).
   if (game.gameOver) return;
-  // Don't pop a modal while chisel is mid-interaction.
+  // Don't pop a modal while chisel or polish is mid-interaction —
+  // the modal would steal the click/keyboard focus the power-up needs.
   if (game.chisel.active || game.chisel.target) return;
+  if (game.polish.active || game.polish.target) return;
   // Don't open a second menu if one is already up.
   if (!powerupMenu$.classList.contains('hidden')) return;
   if (!curseMenu$.classList.contains('hidden'))   return;
@@ -219,18 +221,25 @@ function syncUnlocksUI() {
   }
 }
 
-// -------- Chisel hint banner --------
-// Shown over the board while chisel.active is true. Created lazily
-// so we don't have to clutter index.html with another element.
+// -------- Chisel / Polish hint banner --------
+// Shared banner — chisel and polish reuse the same overlay element
+// since only one is ever active at a time. The text & styling tweak
+// based on which power-up is currently asking for a pick.
 const boardWrap$ = document.getElementById('board-wrap');
 const chiselHint$ = document.createElement('div');
 chiselHint$.id = 'chisel-hint';
-chiselHint$.innerHTML = 'CLICK OR USE ARROW KEYS + ENTER TO CHISEL';
 chiselHint$.classList.add('hidden');
 boardWrap$.appendChild(chiselHint$);
 
 function syncChiselUI() {
-  const active = game.chisel.active;
+  const chiselActive = game.chisel.active;
+  const polishActive = game.polish.active;
+  const active = chiselActive || polishActive;
+  if (chiselActive) {
+    chiselHint$.innerHTML = 'CLICK OR USE ARROW KEYS + ENTER TO CHISEL';
+  } else if (polishActive) {
+    chiselHint$.innerHTML = 'CLICK OR USE ARROW KEYS + ENTER TO POLISH';
+  }
   chiselHint$.classList.toggle('hidden', !active);
   boardWrap$.classList.toggle('chiseling', active);
 }
@@ -267,6 +276,10 @@ game.onPowerUpChoice  = ()  => showNextChoice();
 game.onCurseChoice    = ()  => showNextChoice();
 // When the chisel animation finishes, dispatch any deferred menu.
 game.onChiselComplete = ()  => showNextChoice();
+// Polish runs through the same menu-deferral flow. It fires either at
+// the end of the materialize animation (no line cleared) OR after a
+// polish-triggered line-clear animation completes.
+game.onPolishComplete = ()  => showNextChoice();
 // Junk-curse FX: small notification so the row drop doesn't feel silent.
 game.onJunk           = (n) => notify(n > 1 ? `JUNK +${n}` : 'JUNK', 'b2b', 1400);
 game.onRain           = (n) => notify(n > 1 ? `RAIN +${n}` : 'RAIN', 'b2b', 1300);
@@ -277,11 +290,11 @@ setupInput(game, {
   onResume: hideOverlay,
 });
 
-// -------- Chisel power-up — pick a block to remove --------
+// -------- Chisel / Polish power-ups — pick a cell on the board --------
 // Translate a click on the board canvas into a (col, row) and let
-// the Game decide whether the cell is a valid target. We do nothing
-// when chisel.active is false so normal canvas clicks (none today,
-// but defensive) stay no-ops.
+// the Game decide whether the cell is a valid target for whichever
+// power-up is currently active. We do nothing otherwise so normal
+// canvas clicks stay no-ops.
 function boardClickToCell(e) {
   const rect = board$.getBoundingClientRect();
   // The canvas internal resolution may differ from its CSS size if
@@ -297,9 +310,16 @@ function boardClickToCell(e) {
   return { col, row };
 }
 board$.addEventListener('click', (e) => {
-  if (!game.chisel.active) return;
-  const { col, row } = boardClickToCell(e);
-  game.chiselSelect(col, row);
+  if (game.chisel.active) {
+    const { col, row } = boardClickToCell(e);
+    game.chiselSelect(col, row);
+    return;
+  }
+  if (game.polish.active) {
+    const { col, row } = boardClickToCell(e);
+    game.polishSelect(col, row);
+    return;
+  }
 });
 
 let lastTime = 0;

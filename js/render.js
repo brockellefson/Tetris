@@ -176,12 +176,22 @@ export function drawBoard(ctx, canvas, game) {
     drawChiselShatter(ctx, game.chisel.target, game.chiselProgress());
   }
 
+  // Polish materialize animation (the new POLISH cell is already drawn
+  // by the locked-blocks pass above; this just adds the FX overlay).
+  if (game.polish?.target) {
+    drawPolishShimmer(ctx, game.polish.target, game.polishProgress());
+  }
+
   if (!game.current || game.gameOver) {
-    // Still paint the chisel cursor highlight even when there's no
-    // active piece (e.g. between spawns). Late-return path.
+    // Still paint the chisel/polish cursor highlight even when there's
+    // no active piece (e.g. between spawns). Late-return path.
     if (game.chisel?.active && game.chisel.cursor) {
       const onBlock = !!game.board[game.chisel.cursor.y]?.[game.chisel.cursor.x];
       drawChiselCursor(ctx, game.chisel.cursor, onBlock);
+    }
+    if (game.polish?.active && game.polish.cursor) {
+      const onEmpty = !game.board[game.polish.cursor.y]?.[game.polish.cursor.x];
+      drawPolishCursor(ctx, game.polish.cursor, onEmpty);
     }
     return;
   }
@@ -216,6 +226,18 @@ export function drawBoard(ctx, canvas, game) {
   if (game.chisel?.active && game.chisel.cursor) {
     const onBlock = !!game.board[game.chisel.cursor.y]?.[game.chisel.cursor.x];
     drawChiselCursor(ctx, game.chisel.cursor, onBlock);
+  }
+
+  // Polish keyboard-cursor highlight — same drawn-last rule. Polish is
+  // the inverse of chisel: green when the cursor is on an empty cell
+  // (Enter will polish it), red when over a filled cell or a cell
+  // currently occupied by the active piece.
+  if (game.polish?.active && game.polish.cursor) {
+    const cx = game.polish.cursor.x;
+    const cy = game.polish.cursor.y;
+    const onFilled = !!game.board[cy]?.[cx];
+    const onPiece  = game.isCellUnderActivePiece?.(cx, cy) ?? false;
+    drawPolishCursor(ctx, game.polish.cursor, !onFilled && !onPiece);
   }
 }
 
@@ -337,6 +359,84 @@ function drawChiselCursor(ctx, cursor, onBlock) {
   ctx.strokeRect(px + 2, py + 2, BLOCK - 4, BLOCK - 4);
 
   // Inner thinner ring for a "crosshair" look that reads on any color.
+  ctx.shadowBlur  = 0;
+  ctx.globalAlpha = 1;
+  ctx.lineWidth   = 1.5;
+  ctx.strokeStyle = '#ffffff';
+  ctx.strokeRect(px + 5, py + 5, BLOCK - 10, BLOCK - 10);
+  ctx.restore();
+}
+
+// Polish materialize effect — the placed POLISH cell is drawn normally
+// by the locked-blocks pass; this overlays a fading white flash plus a
+// ring of sparkle particles converging *inward* (the visual opposite
+// of chisel's outward shrapnel) so the block reads as something
+// snapping into existence.
+//   target   { x, y, timer }
+//   progress 0..1
+function drawPolishShimmer(ctx, target, progress) {
+  const cx = target.x * BLOCK + BLOCK / 2;
+  const cy = target.y * BLOCK + BLOCK / 2;
+
+  // 1. White flash overlay on the cell — bright at the moment of
+  //    placement, fades out as the block settles.
+  const flash = Math.max(0, 1 - progress);
+  if (flash > 0) {
+    ctx.save();
+    ctx.fillStyle = `rgba(255, 255, 255, ${0.65 * flash})`;
+    ctx.fillRect(target.x * BLOCK, target.y * BLOCK, BLOCK, BLOCK);
+    ctx.restore();
+  }
+
+  // 2. Sparkle particles — start far out, converge to center as the
+  //    animation progresses, fading as they arrive.
+  ctx.save();
+  ctx.fillStyle = '#ffffff';
+  ctx.shadowColor = '#ffffff';
+  ctx.shadowBlur = 10;
+  const N = 8;
+  const maxDist = BLOCK * 1.8;
+  for (let i = 0; i < N; i++) {
+    const angle = (i / N) * Math.PI * 2 + 0.2;
+    const dist  = (1 - progress) * maxDist;
+    const fx = cx + Math.cos(angle) * dist;
+    const fy = cy + Math.sin(angle) * dist;
+    // Particle radius peaks mid-animation — looks like sparkles
+    // streaking in and snuffing out at the cell.
+    const r  = Math.max(0.5, BLOCK * 0.12 * (1 - Math.abs(progress * 2 - 1)));
+    ctx.globalAlpha = Math.max(0, 1 - Math.pow(progress, 2));
+    ctx.beginPath();
+    ctx.arc(fx, fy, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// Polish keyboard-cursor highlight — mirror of drawChiselCursor but
+// with valid-target colors flipped (green = empty cell, red = filled
+// or under the active piece). The shape and pulse are intentionally
+// identical so the two power-ups feel like one selection mode in two
+// flavors.
+function drawPolishCursor(ctx, cursor, onEmpty) {
+  const px = cursor.x * BLOCK;
+  const py = cursor.y * BLOCK;
+  const t = (Date.now() % 700) / 700;
+  const pulse = 0.7 + 0.3 * Math.abs(Math.sin(t * Math.PI));
+  const color = onEmpty ? '#33ff66' : '#ff3030';
+
+  ctx.save();
+  ctx.fillStyle = onEmpty
+    ? 'rgba(51, 255, 102, 0.22)'
+    : 'rgba(255, 48, 48, 0.18)';
+  ctx.fillRect(px, py, BLOCK, BLOCK);
+
+  ctx.shadowColor = color;
+  ctx.shadowBlur  = 22 * pulse;
+  ctx.strokeStyle = color;
+  ctx.globalAlpha = pulse;
+  ctx.lineWidth   = 4;
+  ctx.strokeRect(px + 2, py + 2, BLOCK - 4, BLOCK - 4);
+
   ctx.shadowBlur  = 0;
   ctx.globalAlpha = 1;
   ctx.lineWidth   = 1.5;

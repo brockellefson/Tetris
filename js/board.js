@@ -65,9 +65,17 @@ export function findFullRows(board) {
 // its extra columns after a clear.
 export function removeRows(board, rows) {
   const cols = board[0]?.length ?? COLS;
-  // Sort descending so splicing doesn't shift the indices we still need.
-  for (const r of [...rows].sort((a, b) => b - a)) {
-    board.splice(r, 1);
+  // Two-phase: splice all the cleared rows out FIRST (descending so the
+  // remaining indices stay valid), THEN unshift the replacement empty
+  // rows. Interleaving splice+unshift inside the same loop is wrong —
+  // each unshift bumps every other row's index up by 1, so subsequent
+  // splices remove the wrong rows. That manifests as a multi-line
+  // clear (Tetris, triple, double) leaving some of the full rows on
+  // the board, which then get cleared on the *next* lock. (Issue:
+  // "we aren't detecting some" multi-line clears.)
+  const sorted = [...rows].sort((a, b) => b - a);
+  for (const r of sorted) board.splice(r, 1);
+  for (let i = 0; i < sorted.length; i++) {
     board.unshift(Array(cols).fill(null));
   }
 }
