@@ -14,6 +14,7 @@
 import memory    from './memory.js';
 import predictor from './predictor.js';
 import { next1, next2, next3, next4, next5 } from './foresight.js';
+import { growth1, growth2, growth3, growth4, growth5 } from './growth-spurt.js';
 import tetris    from './tetris.js';
 import chisel    from './chisel.js';
 
@@ -25,6 +26,11 @@ export const ALL_POWERUPS = [
   next3,
   next4,
   next5,
+  growth1,
+  growth2,
+  growth3,
+  growth4,
+  growth5,
   tetris,
   chisel,
 ];

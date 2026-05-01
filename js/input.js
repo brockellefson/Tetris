@@ -48,26 +48,61 @@ export function setupInput(game, callbacks = {}) {
       return;
     }
 
-    // Power-up / curse choice menu open — game inputs are ignored.
-    // Each menu owns its own keyboard listener (1/2/3) in main.js.
-    if (game.pendingChoices > 0) return;
-    if (game.pendingCurses  > 0) return;
-
-    // Chisel power-up: while waiting for a block click or while the
-    // shatter animation plays, gameplay keys are inert. R/P still work
-    // because they're allowed below — but they short-circuit on the
-    // Game side via paused/gameOver guards. Keep this minimal: just
-    // skip gameplay actions, not control keys like R/P.
+    // Chisel power-up: while waiting for a pick (or while the shatter
+    // animation plays), gameplay keys are inert. Arrow keys / WASD
+    // drive a keyboard cursor so the player can pick a block without
+    // a mouse, with Enter/Space confirming the highlighted cell.
+    //
+    // IMPORTANT: this branch runs *before* the pendingChoices/Curses
+    // early-return below. Chisel freezes the menu queue (showNextChoice
+    // bails while chisel is active), so pendingChoices can still be > 0
+    // here even though no modal is on screen — and we still need to
+    // handle keys.
     if (game.chisel.active || game.chisel.target) {
-      // Allow R (restart) so a stuck player can recover; everything
-      // else falls through and is swallowed.
+      // R (restart) still works so a stuck player can recover.
       if (e.key === 'r' || e.key === 'R') {
         e.preventDefault();
         game.start();
         callbacks.onStart?.();
+        return;
+      }
+      // Cursor-driven selection only applies while we're awaiting a pick.
+      if (game.chisel.active) {
+        switch (e.key) {
+          case 'ArrowLeft':
+          case 'a': case 'A':
+            e.preventDefault();
+            game.chiselMoveCursor(-1, 0);
+            return;
+          case 'ArrowRight':
+          case 'd': case 'D':
+            e.preventDefault();
+            game.chiselMoveCursor(1, 0);
+            return;
+          case 'ArrowUp':
+          case 'w': case 'W':
+            e.preventDefault();
+            game.chiselMoveCursor(0, -1);
+            return;
+          case 'ArrowDown':
+          case 's': case 'S':
+            e.preventDefault();
+            game.chiselMoveCursor(0, 1);
+            return;
+          case 'Enter':
+          case ' ':
+            e.preventDefault();
+            game.chiselConfirm();
+            return;
+        }
       }
       return;
     }
+
+    // Power-up / curse choice menu open — game inputs are ignored.
+    // Each menu owns its own keyboard listener (arrows/Enter/1-2-3) in main.js.
+    if (game.pendingChoices > 0) return;
+    if (game.pendingCurses  > 0) return;
 
     switch (e.key) {
       case 'ArrowLeft':

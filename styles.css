@@ -212,11 +212,17 @@ canvas { display: block; }
 .powerup-card:nth-child(3) { animation-delay: 0.12s; }
 
 .powerup-card:hover,
-.powerup-card:focus {
+.powerup-card:focus,
+.powerup-card.selected {
   border-color: #00f0f0;
   transform: translateY(-4px);
   box-shadow: 0 0 24px rgba(0, 240, 240, 0.25);
   outline: none;
+}
+
+.powerup-card.selected {
+  border-width: 2px;
+  box-shadow: 0 0 32px rgba(0, 240, 240, 0.55);
 }
 
 .powerup-card-name {
@@ -290,9 +296,14 @@ canvas { display: block; }
   animation: card-enter 0.35s cubic-bezier(0.2, 0.8, 0.3, 1) backwards;
 }
 #curse-menu .powerup-card:hover,
-#curse-menu .powerup-card:focus {
+#curse-menu .powerup-card:focus,
+#curse-menu .powerup-card.selected {
   border-color: #ff3030;
   box-shadow: 0 0 24px rgba(255, 48, 48, 0.30);
+}
+#curse-menu .powerup-card.selected {
+  border-width: 2px;
+  box-shadow: 0 0 32px rgba(255, 48, 48, 0.55);
 }
 #curse-menu .powerup-card-name {
   color: #ff5050;

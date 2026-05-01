@@ -17,14 +17,19 @@ export function newBoard() {
 
 // Returns true if the piece at its current (x, y, rot) overlaps
 // a wall, the floor, or any locked cell.
+//
+// Width is read from the board itself (not the COLS constant) so that
+// runtime-grown boards — Growth Spurt power-up adds columns — collide
+// against their actual right edge instead of the original 10-wide wall.
 export function collides(board, piece) {
   const s = shapeOf(piece);
+  const cols = board[0]?.length ?? COLS;
   for (let r = 0; r < s.length; r++) {
     for (let c = 0; c < s[r].length; c++) {
       if (!s[r][c]) continue;
       const x = piece.x + c;
       const y = piece.y + r;
-      if (x < 0 || x >= COLS || y >= ROWS) return true;
+      if (x < 0 || x >= cols || y >= ROWS) return true;
       if (y >= 0 && board[y][x]) return true;
     }
   }
@@ -55,12 +60,15 @@ export function findFullRows(board) {
 }
 
 // Removes the specified rows from the board, shifting everything above
-// down to fill the gap. Mutates `board`.
+// down to fill the gap. Mutates `board`. Replacement rows match the
+// board's current width so a grown board (Growth Spurt power-up) keeps
+// its extra columns after a clear.
 export function removeRows(board, rows) {
+  const cols = board[0]?.length ?? COLS;
   // Sort descending so splicing doesn't shift the indices we still need.
   for (const r of [...rows].sort((a, b) => b - a)) {
     board.splice(r, 1);
-    board.unshift(Array(COLS).fill(null));
+    board.unshift(Array(cols).fill(null));
   }
 }
 

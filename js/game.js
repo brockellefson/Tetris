@@ -68,6 +68,10 @@ export class Game {
       hold:      false,
       ghost:     false,
       nextCount: 0,
+      // Number of extra columns granted by the Growth Spurt power-up.
+      // Caps at 5 (the highest tier). The board itself stores the actual
+      // width — this counter is just for the unlock-gating UI and reset.
+      extraCols: 0,
     };
     this.pendingChoices = 0;
     // The very first line clear of a run grants a bonus power-up choice
@@ -100,8 +104,48 @@ export class Game {
     //            the destruction animation plays. The block is removed
     //            from the board the instant it's picked; `type` is kept
     //            around purely so the animation can use the right color.
-    this.chisel = { active: false, target: null };
+    //   cursor — {x, y} of the keyboard-driven block selector while
+    //            chisel.active. Free-roams the grid so the player can
+    //            navigate to any cell with arrow keys; only confirms
+    //            when the cell holds a block. Null when chisel is idle.
+    this.chisel = { active: false, target: null, cursor: null };
     this.refillQueue();
+  }
+
+  // Seed the chisel cursor on the topmost-leftmost filled cell so the
+  // highlight starts on a meaningful block. Called by the chisel power-up
+  // immediately after activating. Falls back to (0, 0) only if the board
+  // is somehow empty (the power-up's `available` guard prevents this).
+  chiselInitCursor() {
+    const cols = this.board[0]?.length ?? 10;
+    for (let r = 0; r < this.board.length; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (this.board[r][c]) {
+          this.chisel.cursor = { x: c, y: r };
+          return;
+        }
+      }
+    }
+    this.chisel.cursor = { x: 0, y: 0 };
+  }
+
+  // Move the chisel cursor by (dx, dy), clamped to board bounds.
+  // Cursor moves freely over empty cells too — the player can use it
+  // as a normal pointer; only confirming an empty cell is a no-op.
+  chiselMoveCursor(dx, dy) {
+    if (!this.chisel.active || !this.chisel.cursor) return;
+    const cols = this.board[0]?.length ?? 10;
+    const rows = this.board.length;
+    const nx = Math.max(0, Math.min(cols - 1, this.chisel.cursor.x + dx));
+    const ny = Math.max(0, Math.min(rows - 1, this.chisel.cursor.y + dy));
+    this.chisel.cursor = { x: nx, y: ny };
+  }
+
+  // Keyboard-confirm the cursor cell. Defers to chiselSelect, which
+  // already returns false for empty cells so misfires are harmless.
+  chiselConfirm() {
+    if (!this.chisel.active || !this.chisel.cursor) return false;
+    return this.chiselSelect(this.chisel.cursor.x, this.chisel.cursor.y);
   }
 
   // Apply a chosen power-up. Decrements the pending count so the next
@@ -116,6 +160,16 @@ export class Game {
   applyCurse(curse) {
     curse.apply(this);
     this.pendingCurses = Math.max(0, this.pendingCurses - 1);
+  }
+
+  // Growth Spurt power-up — widen the board by one column, on the right
+  // edge so existing block positions and the active piece are unaffected.
+  // Each row gets a trailing null appended; the renderer and click-to-cell
+  // helpers read width from board[0].length so they pick the change up
+  // automatically. Returns the new column count.
+  addColumn() {
+    for (const row of this.board) row.push(null);
+    return this.board[0].length;
   }
 
   // Push a junk row onto the bottom of the board, shifting everything
@@ -192,6 +246,7 @@ export class Game {
     if (!type) return false;                 // empty cell — let the player try again
     this.board[y][x] = null;
     this.chisel.active = false;
+    this.chisel.cursor = null;
     this.chisel.target = { x, y, type, timer: 0 };
     this.onChiselHit?.();                    // optional FX hook
     return true;

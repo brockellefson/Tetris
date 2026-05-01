@@ -24,5 +24,10 @@ export default {
   description: 'Remove a single 1×1 block of your choice from the board.',
   available: (game) =>
     game.board && game.board.some(row => row.some(cell => cell !== null)),
-  apply: (game) => { game.chisel.active = true; },
+  apply: (game) => {
+    game.chisel.active = true;
+    // Seed the keyboard cursor on a real block so arrow-key navigation
+    // and the on-board highlight have a sensible starting position.
+    game.chiselInitCursor();
+  },
 };

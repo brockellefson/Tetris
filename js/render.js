@@ -133,13 +133,17 @@ export function drawCell(ctx, x, y, color, ghost = false) {
 // Paint the main playfield: background, grid lines, locked blocks,
 // ghost outline, and active piece.
 export function drawBoard(ctx, canvas, game) {
+  // Read width from the board so the renderer follows runtime growth
+  // (Growth Spurt power-up adds columns).
+  const cols = game.board[0]?.length ?? COLS;
+
   ctx.fillStyle = COLORS.BG;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   // grid lines
   ctx.strokeStyle = COLORS.GRID;
   ctx.lineWidth = 1;
-  for (let x = 1; x < COLS; x++) {
+  for (let x = 1; x < cols; x++) {
     ctx.beginPath();
     ctx.moveTo(x * BLOCK + 0.5, 0);
     ctx.lineTo(x * BLOCK + 0.5, ROWS * BLOCK);
@@ -148,13 +152,13 @@ export function drawBoard(ctx, canvas, game) {
   for (let y = 1; y < ROWS; y++) {
     ctx.beginPath();
     ctx.moveTo(0, y * BLOCK + 0.5);
-    ctx.lineTo(COLS * BLOCK, y * BLOCK + 0.5);
+    ctx.lineTo(cols * BLOCK, y * BLOCK + 0.5);
     ctx.stroke();
   }
 
   // locked blocks
   for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS; c++) {
+    for (let c = 0; c < cols; c++) {
       if (game.board[r][c]) drawCell(ctx, c, r, COLORS[game.board[r][c]]);
     }
   }
@@ -163,7 +167,7 @@ export function drawBoard(ctx, canvas, game) {
   if (game.isClearing && game.isClearing()) {
     const p = game.clearProgress();
     for (const row of game.clearingRows) {
-      drawClearOverlay(ctx, row, p);
+      drawClearOverlay(ctx, row, p, cols);
     }
   }
 
@@ -172,7 +176,15 @@ export function drawBoard(ctx, canvas, game) {
     drawChiselShatter(ctx, game.chisel.target, game.chiselProgress());
   }
 
-  if (!game.current || game.gameOver) return;
+  if (!game.current || game.gameOver) {
+    // Still paint the chisel cursor highlight even when there's no
+    // active piece (e.g. between spawns). Late-return path.
+    if (game.chisel?.active && game.chisel.cursor) {
+      const onBlock = !!game.board[game.chisel.cursor.y]?.[game.chisel.cursor.x];
+      drawChiselCursor(ctx, game.chisel.cursor, onBlock);
+    }
+    return;
+  }
 
   const s = shapeOf(game.current);
   const gy = game.ghostY();
@@ -198,6 +210,13 @@ export function drawBoard(ctx, canvas, game) {
       if (y >= 0) drawCell(ctx, x, y, COLORS[game.current.type]);
     }
   }
+
+  // Chisel keyboard-cursor highlight — drawn LAST so it sits on top
+  // of every piece and overlay. Only painted while awaiting a pick.
+  if (game.chisel?.active && game.chisel.cursor) {
+    const onBlock = !!game.board[game.chisel.cursor.y]?.[game.chisel.cursor.x];
+    drawChiselCursor(ctx, game.chisel.cursor, onBlock);
+  }
 }
 
 // Paints the line-clear effect on a single row.
@@ -206,7 +225,7 @@ export function drawBoard(ctx, canvas, game) {
 // Two phases:
 //   0.0 → 0.55  flash the whole row bright white (intensity pulses)
 //   0.55 → 1.0  wipe outward from the center, revealing background
-function drawClearOverlay(ctx, row, progress) {
+function drawClearOverlay(ctx, row, progress, cols = COLS) {
   const py = row * BLOCK;
 
   if (progress < 0.55) {
@@ -214,13 +233,13 @@ function drawClearOverlay(ctx, row, progress) {
     const t = progress / 0.55;
     const alpha = 0.45 + 0.35 * Math.sin(t * Math.PI * 3);
     ctx.fillStyle = `rgba(255, 255, 255, ${Math.max(0, alpha)})`;
-    ctx.fillRect(0, py, COLS * BLOCK, BLOCK);
+    ctx.fillRect(0, py, cols * BLOCK, BLOCK);
   } else {
     // Wipe phase — clear cells from the center outward.
     const wipe = (progress - 0.55) / 0.45;       // 0..1 within this phase
-    const reach = wipe * (COLS / 2 + 0.5);        // half-width of the gap
-    const center = COLS / 2;
-    for (let c = 0; c < COLS; c++) {
+    const reach = wipe * (cols / 2 + 0.5);        // half-width of the gap
+    const center = cols / 2;
+    for (let c = 0; c < cols; c++) {
       const dist = Math.abs(c + 0.5 - center);
       if (dist < reach) {
         // Wiped — paint background.
@@ -287,6 +306,42 @@ function drawChiselShatter(ctx, target, progress) {
     ctx.arc(fx, fy, r, 0, Math.PI * 2);
     ctx.fill();
   }
+  ctx.restore();
+}
+
+// Chisel keyboard-cursor highlight — a pulsing outlined square over
+// the currently selected cell. Bright yellow when hovering a real
+// block (Enter will chisel it), red when over an empty cell so the
+// player can tell empty taps will be no-ops.
+function drawChiselCursor(ctx, cursor, onBlock) {
+  const px = cursor.x * BLOCK;
+  const py = cursor.y * BLOCK;
+  // Pulse based on time so the highlight reads as "live" cursor, not
+  // a static overlay. Date.now() is fine here — cheap and frame-driven.
+  const t = (Date.now() % 700) / 700;
+  const pulse = 0.7 + 0.3 * Math.abs(Math.sin(t * Math.PI));
+  const color = onBlock ? '#ffea00' : '#ff3030';
+
+  ctx.save();
+  // Soft tinted overlay over the cell so the highlight is unmistakable
+  // even when the cursor is on a bright tile.
+  ctx.fillStyle = onBlock ? 'rgba(255, 234, 0, 0.22)' : 'rgba(255, 48, 48, 0.18)';
+  ctx.fillRect(px, py, BLOCK, BLOCK);
+
+  // Outer glow ring.
+  ctx.shadowColor = color;
+  ctx.shadowBlur  = 22 * pulse;
+  ctx.strokeStyle = color;
+  ctx.globalAlpha = pulse;
+  ctx.lineWidth   = 4;
+  ctx.strokeRect(px + 2, py + 2, BLOCK - 4, BLOCK - 4);
+
+  // Inner thinner ring for a "crosshair" look that reads on any color.
+  ctx.shadowBlur  = 0;
+  ctx.globalAlpha = 1;
+  ctx.lineWidth   = 1.5;
+  ctx.strokeStyle = '#ffffff';
+  ctx.strokeRect(px + 5, py + 5, BLOCK - 10, BLOCK - 10);
   ctx.restore();
 }
 

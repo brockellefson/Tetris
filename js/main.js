@@ -12,7 +12,7 @@ import { setupInput } from './input.js';
 import { playLockSound, playClearSound } from './sound.js';
 import { pickChoices } from './powerups/index.js';
 import { pickCurseChoices } from './curses/index.js';
-import { COLS, ROWS } from './constants.js';
+import { COLS, ROWS, BLOCK } from './constants.js';
 
 // -------- DOM lookup --------
 const board$        = document.getElementById('board');
@@ -68,6 +68,8 @@ function hideOverlay() {
 
 function buildChoiceMenu({ menuEl, cardsEl, choices, onPick }) {
   cardsEl.innerHTML = '';
+  let selected = 0;
+  const cardEls = [];
   choices.forEach((c, i) => {
     const card = document.createElement('button');
     card.className = 'powerup-card';
@@ -77,15 +79,52 @@ function buildChoiceMenu({ menuEl, cardsEl, choices, onPick }) {
       <div class="powerup-card-key"><kbd>${i + 1}</kbd></div>
     `;
     card.addEventListener('click', () => pick(c));
+    card.addEventListener('mouseenter', () => setSelected(i));
     cardsEl.appendChild(card);
+    cardEls.push(card);
   });
 
+  function setSelected(i) {
+    selected = ((i % choices.length) + choices.length) % choices.length;
+    cardEls.forEach((el, idx) => {
+      el.classList.toggle('selected', idx === selected);
+    });
+  }
+
+  // Highlight the first card by default so the player has a visible cursor.
+  setSelected(0);
+
   function onKey(e) {
-    const idx = ['1', '2', '3'].indexOf(e.key);
-    if (idx !== -1 && idx < choices.length) {
+    // Number-key shortcuts still work as a direct pick.
+    const numIdx = ['1', '2', '3'].indexOf(e.key);
+    if (numIdx !== -1 && numIdx < choices.length) {
       e.preventDefault();
       e.stopPropagation();
-      pick(choices[idx]);
+      pick(choices[numIdx]);
+      return;
+    }
+
+    switch (e.key) {
+      case 'ArrowLeft':
+      case 'ArrowUp':
+      case 'a': case 'A':
+        e.preventDefault();
+        e.stopPropagation();
+        setSelected(selected - 1);
+        break;
+      case 'ArrowRight':
+      case 'ArrowDown':
+      case 'd': case 'D':
+        e.preventDefault();
+        e.stopPropagation();
+        setSelected(selected + 1);
+        break;
+      case 'Enter':
+      case ' ':
+        e.preventDefault();
+        e.stopPropagation();
+        pick(choices[selected]);
+        break;
     }
   }
   document.addEventListener('keydown', onKey, { capture: true });
@@ -182,7 +221,7 @@ function syncUnlocksUI() {
 const boardWrap$ = document.getElementById('board-wrap');
 const chiselHint$ = document.createElement('div');
 chiselHint$.id = 'chisel-hint';
-chiselHint$.innerHTML = 'CLICK A BLOCK TO CHISEL';
+chiselHint$.innerHTML = 'CLICK OR USE ARROW KEYS + ENTER TO CHISEL';
 chiselHint$.classList.add('hidden');
 boardWrap$.appendChild(chiselHint$);
 
@@ -247,7 +286,9 @@ function boardClickToCell(e) {
   const scaleY = board$.height / rect.height;
   const px = (e.clientX - rect.left) * scaleX;
   const py = (e.clientY - rect.top)  * scaleY;
-  const col = Math.floor(px / (board$.width  / COLS));
+  // Read live width — Growth Spurt power-up grows the board mid-run.
+  const cols = game.board[0]?.length ?? COLS;
+  const col = Math.floor(px / (board$.width  / cols));
   const row = Math.floor(py / (board$.height / ROWS));
   return { col, row };
 }
@@ -266,6 +307,13 @@ function frame(now) {
   lastTime = now;
 
   game.tick(dt);
+
+  // Keep the canvas pixel buffer in sync with the (possibly grown)
+  // board width. Setting .width clears the canvas, so guard against
+  // doing it every frame — only when the column count actually changes.
+  const cols = game.board[0]?.length ?? COLS;
+  const desiredWidth = cols * BLOCK;
+  if (board$.width !== desiredWidth) board$.width = desiredWidth;
 
   // Render
   drawBoard(ctx, board$, game);
