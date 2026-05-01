@@ -9,6 +9,7 @@
 import { Game } from './game.js';
 import { drawBoard, drawMini } from './render.js';
 import { setupInput } from './input.js';
+import { playLockSound, playClearSound } from './sound.js';
 
 // -------- DOM lookup --------
 const board$        = document.getElementById('board');
@@ -33,6 +34,8 @@ function hideOverlay() {
 
 // -------- Boot --------
 const game = new Game();
+game.onLock      = playLockSound;
+game.onLineClear = playClearSound;
 
 setupInput(game, {
   onStart:  hideOverlay,

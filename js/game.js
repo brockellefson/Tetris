@@ -172,6 +172,7 @@ export class Game {
   lockCurrent() {
     lockPiece(this.board, this.current);
     this.triggerShake(SHAKE_LOCK); // small bounce on every placement
+    this.onLock?.(); // optional sound / FX hook (set by main.js)
     const fullRows = findFullRows(this.board);
     if (fullRows.length > 0) {
       // Start the clear animation. The rows stay on the board — the
@@ -180,6 +181,7 @@ export class Game {
       this.clearingRows = fullRows;
       this.clearTimer = 0;
       this.current = null; // hide the piece; spawn deferred until clear completes
+      this.onLineClear?.(fullRows.length); // fires at start of animation
     } else {
       this.spawnNext();
     }
