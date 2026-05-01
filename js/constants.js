@@ -74,3 +74,9 @@ export const POLISH_DURATION = 360;
 export const SHAKE_DURATION = 220;
 export const SHAKE_LOCK     = 2;
 export const SHAKE_HARDDROP = 4;
+
+// Slick power-up — milliseconds a grounded piece can sit before locking,
+// giving the player a window to make split-second adjustments. The timer
+// resets on every successful move/rotate (step reset), so chained inputs
+// can extend the window indefinitely. Hard drops bypass this entirely.
+export const LOCK_DELAY = 500;

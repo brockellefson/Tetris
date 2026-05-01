@@ -299,6 +299,31 @@ canvas { display: block; }
    comfortably without squishing either description. */
 .powerup-card { min-height: 300px; }
 
+/* ======== Active blessing indicators (sit under the score panel) ======== */
+/* Mirror of the curse-tag block, retinted cyan to match the buff color
+   used on the power-up half of each choice card.                      */
+#blessing-section.hidden { display: none; }
+#blessing-section { margin-top: 4px; }
+.blessing-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.blessing-list:empty { display: none; }
+.blessing-tag {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: #00f0f0;
+  background: #0e1a1c;
+  border: 1px solid #1a3a3e;
+  border-radius: 4px;
+  padding: 2px 7px;
+  text-shadow: 0 0 6px rgba(0, 240, 240, 0.4);
+}
+
 /* ======== Active curse indicators (sit under the score panel) ======== */
 #curse-section.hidden { display: none; }
 #curse-section { margin-top: 4px; }

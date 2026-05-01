@@ -28,10 +28,12 @@ const levelEl       = document.getElementById('level');
 const linesEl       = document.getElementById('lines');
 const holdPanel$    = document.getElementById('hold-panel');
 const nextPanel$    = document.getElementById('next-panel');
-const powerupMenu$  = document.getElementById('powerup-menu');
-const powerupCards$ = document.getElementById('powerup-cards');
-const curseSection$ = document.getElementById('curse-section');
-const curseList$    = document.getElementById('curse-list');
+const powerupMenu$    = document.getElementById('powerup-menu');
+const powerupCards$   = document.getElementById('powerup-cards');
+const blessingSection$ = document.getElementById('blessing-section');
+const blessingList$    = document.getElementById('blessing-list');
+const curseSection$   = document.getElementById('curse-section');
+const curseList$      = document.getElementById('curse-list');
 
 // -------- Floating notifications (combo / TETRIS / perfect clear) --------
 // CSS owns the animation; JS just appends the element and removes it
@@ -249,6 +251,37 @@ function syncChiselUI() {
   boardWrap$.classList.toggle('chiseling', active);
 }
 
+// -------- Active-blessing indicator --------
+// Mirror of syncCursesUI for the persistent buffs the player has
+// unlocked. We only surface unlocks that have an ongoing effect
+// (Hold, Ghost, Psychic, Growth) — one-shot consumables like Chisel,
+// Polish, and Tetris vanish once spent so showing them as a "blessing"
+// would be misleading. Cheap enough to recompute every frame.
+function syncBlessingsUI() {
+  const tags = [];
+  if (game.unlocks.hold)  tags.push('HOLD');
+  if (game.unlocks.ghost) tags.push('GHOST');
+  if (game.unlocks.slick) tags.push('SLICK');
+  if (game.unlocks.nextCount > 0) {
+    tags.push(game.unlocks.nextCount > 1
+      ? `PSYCHIC ×${game.unlocks.nextCount}`
+      : 'PSYCHIC');
+  }
+  if (game.unlocks.extraCols > 0) {
+    tags.push(game.unlocks.extraCols > 1
+      ? `GROWTH ×${game.unlocks.extraCols}`
+      : 'GROWTH');
+  }
+
+  blessingSection$.classList.toggle('hidden', tags.length === 0);
+  // Diff-friendly write — only touch the DOM if the set actually changed.
+  const next = tags.join(',');
+  if (blessingList$.dataset.tags !== next) {
+    blessingList$.dataset.tags = next;
+    blessingList$.innerHTML = tags.map(t => `<span class="blessing-tag">${t}</span>`).join('');
+  }
+}
+
 // -------- Active-curse indicator --------
 // Renders a tag for each curse currently affecting gameplay, under
 // the score panel. Cheap enough to recompute every frame.
@@ -259,7 +292,6 @@ function syncCursesUI() {
     tags.push(game.curses.hyped > 1 ? `HYPED ×${game.curses.hyped}` : 'HYPED');
   }
   if (game.level <= game.curses.flexibleUntilLevel) tags.push('FLEXIBLE');
-  if (game.curses.rain)  tags.push('RAIN');
 
   curseSection$.classList.toggle('hidden', tags.length === 0);
   // Diff-friendly write — only touch the DOM if the set actually changed.
@@ -359,6 +391,7 @@ function frame(now) {
   linesEl.textContent = game.lines;
   syncUnlocksUI();
   syncChiselUI();
+  syncBlessingsUI();
   syncCursesUI();
 
   // Game-over overlay (edge-triggered so we don't repaint every frame)

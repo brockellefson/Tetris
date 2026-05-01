@@ -16,6 +16,7 @@ import {
   POLISH_DURATION,
   SHAKE_DURATION, SHAKE_LOCK, SHAKE_HARDDROP,
   B2B_MULTIPLIER, COMBO_BONUS, PERFECT_CLEAR_BONUS,
+  LOCK_DELAY,
 } from './constants.js';
 import { newBoard, collides, lockPiece, findFullRows, removeRows } from './board.js';
 import { spawn, tryMove, tryRotate, ghostPosition } from './piece.js';
@@ -73,7 +74,17 @@ export class Game {
       // Caps at 5 (the highest tier). The board itself stores the actual
       // width — this counter is just for the unlock-gating UI and reset.
       extraCols: 0,
+      // Slick — when true, a grounded piece waits LOCK_DELAY ms before
+      // locking and resets that window on every successful move/rotate,
+      // letting the player make split-second adjustments. The timer
+      // itself lives on `lockDelayTimer` below.
+      slick:     false,
     };
+    // Slick power-up timer. Counts up while the active piece is grounded
+    // and Slick is unlocked; cleared on successful move/rotate, on spawn,
+    // and after locking. Ignored entirely when `unlocks.slick` is false,
+    // so the standard "lock immediately on collision" path is unchanged.
+    this.lockDelayTimer = 0;
     this.pendingChoices = 0;
     // The very first line clear of a run grants a bonus power-up choice
     // so the player gets a taste of the roguelite progression early
@@ -96,11 +107,7 @@ export class Game {
       junk: false,
       hyped: 0,
       flexibleUntilLevel: 0,
-      rain: false,
     };
-    // Rain curse: counts piece placements while curses.rain is active.
-    // Rolls over to 0 after every batch of 5 — see lockCurrent().
-    this.placementCount = 0;
     // Chisel power-up state.
     //   active — set by the Chisel power-up's apply(); freezes gameplay
     //            and tells the renderer/UI to await a block click.
@@ -265,32 +272,47 @@ export class Game {
     return placed;
   }
 
-  // Rain curse helper — scatters a random number (1-3) of junk blocks
-  // across the top row's currently-empty cells. Pieces spawn at row 0
-  // or row -1, so a rain block landing in a spawn-occupied column will
-  // trigger game-over via the spawn-collision check on the *next*
-  // spawnNext() call. Returns the number of blocks actually placed.
+  // Rain curse helper — drops 5-10 junk blocks into random columns,
+  // one-shot. Each block lands on top of whatever is already stacked
+  // in its column (or on the floor if the column is empty), as if it
+  // had been hard-dropped. Columns that are filled all the way to
+  // the top are skipped, and we avoid landing inside the active
+  // piece to prevent unfair instant overlaps. Multiple blocks can
+  // hit the same column — they pile up in arrival order. Returns
+  // the number of blocks actually placed.
   addRainBlocks() {
+    const ROWS = this.board.length;
     const COLS = this.board[0]?.length ?? 10;
-    const empties = [];
-    for (let c = 0; c < COLS; c++) {
-      if (!this.board[0][c]) empties.push(c);
+    const want = 5 + Math.floor(Math.random() * 6); // 5-10
+    let placed = 0;
+    for (let i = 0; i < want; i++) {
+      // Each drop independently picks any column that still has
+      // headroom right now — that's how the same column can stack
+      // up under multiple raindrops in a row.
+      const candidates = [];
+      for (let c = 0; c < COLS; c++) {
+        if (!this.board[0][c]) candidates.push(c);
+      }
+      if (candidates.length === 0) break;
+      const c = candidates[Math.floor(Math.random() * candidates.length)];
+      // Find the topmost filled cell in this column; the junk lands
+      // one row above it. Empty column → land on the floor.
+      let landingRow = ROWS - 1;
+      for (let r = 0; r < ROWS; r++) {
+        if (this.board[r][c]) { landingRow = r - 1; break; }
+      }
+      if (landingRow < 0) continue;                      // packed full
+      if (this.isCellUnderActivePiece(c, landingRow)) continue; // don't trap the piece
+      this.board[landingRow][c] = 'JUNK';
+      placed += 1;
     }
-    if (empties.length === 0) return 0;
-    // Fisher-Yates so we pick distinct random columns.
-    for (let i = empties.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [empties[i], empties[j]] = [empties[j], empties[i]];
-    }
-    const count = Math.min(empties.length, 1 + Math.floor(Math.random() * 3));
-    for (let i = 0; i < count; i++) {
-      this.board[0][empties[i]] = 'JUNK';
-    }
-    // If a rain block landed inside the active piece, it's game over.
+    // Defensive — landing on top of the stack shouldn't intersect the
+    // active piece, but if a placement *did* land under one (e.g. the
+    // piece is mid-soft-drop above an empty column), end the run.
     if (this.current && collides(this.board, this.current)) {
       this.gameOver = true;
     }
-    return count;
+    return placed;
   }
 
   // Player picked a block to chisel out. Returns true if the click hit
@@ -438,6 +460,10 @@ export class Game {
     const type = this.queue.shift();
     this.current = spawn(type);
     this.canHold = true;
+    // Fresh piece — clear any leftover lock-delay window from the
+    // previous piece so Slick starts measuring from this piece's
+    // first grounded frame.
+    this.lockDelayTimer = 0;
     // If the new piece spawns into a filled cell, the game is over.
     if (collides(this.board, this.current)) {
       this.gameOver = true;
@@ -451,13 +477,21 @@ export class Game {
   move(dx) {
     if (!this.current) return;
     const next = tryMove(this.board, this.current, dx, 0);
-    if (next) this.current = next;
+    if (next) {
+      this.current = next;
+      // Slick "step reset": any successful adjustment refreshes the
+      // lock-delay window so the player can chain inputs into a slot.
+      this.lockDelayTimer = 0;
+    }
   }
 
   rotate(dir) {
     if (!this.current) return;
     const next = tryRotate(this.board, this.current, dir);
-    if (next) this.current = next;
+    if (next) {
+      this.current = next;
+      this.lockDelayTimer = 0; // Slick step reset (see move()).
+    }
   }
 
   softDrop() {
@@ -467,6 +501,10 @@ export class Game {
       this.current = next;
       this.score += 1; // 1 point per soft-dropped cell
     } else {
+      // With Slick unlocked, defer locking to the lock-delay timer in
+      // tick() so the player gets a brief window to adjust. Without
+      // Slick, locking is immediate (the original behavior).
+      if (this.unlocks.slick) return;
       this.lockCurrent();
     }
   }
@@ -507,18 +545,6 @@ export class Game {
     lockPiece(this.board, this.current);
     this.triggerShake(SHAKE_LOCK); // small bounce on every placement
     this.onLock?.(); // optional sound / FX hook (set by main.js)
-
-    // Rain curse: every 5th placement, drop a fresh batch of junk
-    // blocks into the top row. Done before findFullRows so newly-rained
-    // blocks can still complete a full row that the lock just made.
-    if (this.curses.rain) {
-      this.placementCount += 1;
-      if (this.placementCount >= 5) {
-        this.placementCount = 0;
-        const placed = this.addRainBlocks();
-        if (placed > 0) this.onRain?.(placed);
-      }
-    }
 
     const fullRows = findFullRows(this.board);
     if (fullRows.length > 0) {
@@ -723,6 +749,26 @@ export class Game {
       this.dropTimer -= gravityMs;
       this.softDrop();
       if (this.gameOver) break;
+    }
+
+    // Slick lock-delay. While the active piece is grounded (the next
+    // gravity step would collide), accumulate the lock timer; lock
+    // when it overflows. The instant the piece is no longer grounded
+    // (player slid it off a ledge), reset to 0. softDrop() above is
+    // already a no-op for grounded pieces when Slick is unlocked, so
+    // the only path that retires the piece is this timer or a hard
+    // drop. move()/rotate() reset the timer on success for step-reset.
+    if (this.unlocks.slick && this.current && !this.isClearing()) {
+      const grounded = !tryMove(this.board, this.current, 0, 1);
+      if (grounded) {
+        this.lockDelayTimer += dt;
+        if (this.lockDelayTimer >= LOCK_DELAY) {
+          this.lockDelayTimer = 0;
+          this.lockCurrent();
+        }
+      } else {
+        this.lockDelayTimer = 0;
+      }
     }
   }
 

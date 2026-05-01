@@ -1,4 +1,4 @@
-// Power-up: Memory — reveals the Hold slot.
+// Power-up: Hold — unlocks the Hold slot mechanic.
 //
 // Each power-up is a plain object with this shape:
 //   id          unique identifier
@@ -13,8 +13,8 @@
 // in this directory and register it in index.js.
 
 export default {
-  id: 'memory',
-  name: 'Memory',
+  id: 'hold',
+  name: 'Hold',
   description: 'Reveal the Hold slot. Press C or Shift to stash a piece for later.',
   available: (game) => !game.unlocks.hold,
   apply:     (game) => { game.unlocks.hold = true; },

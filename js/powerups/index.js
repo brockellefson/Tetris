@@ -11,17 +11,19 @@
 // the choice cards.
 // ============================================================
 
-import memory    from './memory.js';
-import predictor from './predictor.js';
-import { next1, next2, next3, next4, next5 } from './foresight.js';
+import hold     from './hold.js';
+import ghost    from './ghost.js';
+import { next1, next2, next3, next4, next5 } from './psychic.js';
 import { growth1, growth2, growth3, growth4, growth5 } from './growth-spurt.js';
 import tetris    from './tetris.js';
 import chisel    from './chisel.js';
 import polish    from './polish.js';
+import tired     from './tired.js';
+import slick     from './slick.js';
 
 export const ALL_POWERUPS = [
-  memory,
-  predictor,
+  hold,
+  ghost,
   next1,
   next2,
   next3,
@@ -35,6 +37,8 @@ export const ALL_POWERUPS = [
   tetris,
   chisel,
   polish,
+  tired,
+  slick,
 ];
 
 // Pick up to `count` random eligible power-ups for the choice menu.

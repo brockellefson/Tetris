@@ -1,25 +1,21 @@
-// Curse: Rain — every 5 piece placements while active, scatter a
-// random number of junk blocks across the top row of the board.
+// Curse: Rain — one-time event. The instant the curse is picked,
+// 5-10 junk blocks rain down onto the board. Each block lands on
+// top of whatever is already stacked in its column (as if it were
+// hard-dropped), so the rubble accumulates from the bottom up
+// rather than spawning at the ceiling. Multiple drops can stack
+// on the same column.
 //
 // Implementation:
-//   • Sets `curses.rain = true` and resets `placementCount` so the
-//     first rain event lands exactly 5 placements after the pick.
-//   • The trigger itself lives in Game.lockCurrent() — when the
-//     counter rolls over 5 the game calls Game.addRainBlocks(),
-//     which mutates the top row and may end the game if the spawn
-//     area gets blocked. Players are warned in the description.
-//
-// The "drop a few blocks at once" event also runs immediately on
-// pick so the curse feels active right away.
+//   • Calls Game.addRainBlocks() once and reports the count to the
+//     onRain UI hook. There is no ongoing flag and no per-placement
+//     trigger — once the rubble lands the curse's job is done.
 
 export default {
   id: 'curse-rain',
   name: 'Rain',
-  description: 'Every 5 piece placements, junk blocks rain into the top row.',
+  description: 'A one-time downpour: 5-10 junk blocks rain down and stack on top of the pile.',
   available: () => true,
   apply: (game) => {
-    game.curses.rain = true;
-    game.placementCount = 0;
     const placed = game.addRainBlocks();
     if (placed > 0) game.onRain?.(placed);
   },
