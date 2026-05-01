@@ -95,11 +95,18 @@ function buildChoiceMenu({ menuEl, cardsEl, choices, onPick }) {
   setSelected(0);
 
   function onKey(e) {
+    // We use stopImmediatePropagation so the keydown does NOT reach the
+    // gameplay handler in input.js. That matters for Enter/Space when
+    // picking the Chisel power-up: without this, the same Enter that
+    // confirms the menu would immediately fall through to chiselConfirm
+    // in input.js (both listeners are on `document`) and chisel the
+    // seeded cursor block before the player has a chance to navigate.
+    const stop = () => { e.preventDefault(); e.stopImmediatePropagation(); };
+
     // Number-key shortcuts still work as a direct pick.
     const numIdx = ['1', '2', '3'].indexOf(e.key);
     if (numIdx !== -1 && numIdx < choices.length) {
-      e.preventDefault();
-      e.stopPropagation();
+      stop();
       pick(choices[numIdx]);
       return;
     }
@@ -108,21 +115,18 @@ function buildChoiceMenu({ menuEl, cardsEl, choices, onPick }) {
       case 'ArrowLeft':
       case 'ArrowUp':
       case 'a': case 'A':
-        e.preventDefault();
-        e.stopPropagation();
+        stop();
         setSelected(selected - 1);
         break;
       case 'ArrowRight':
       case 'ArrowDown':
       case 'd': case 'D':
-        e.preventDefault();
-        e.stopPropagation();
+        stop();
         setSelected(selected + 1);
         break;
       case 'Enter':
       case ' ':
-        e.preventDefault();
-        e.stopPropagation();
+        stop();
         pick(choices[selected]);
         break;
     }
