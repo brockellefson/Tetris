@@ -11,21 +11,123 @@
 import { COLS, ROWS, BLOCK, COLORS } from './constants.js';
 import { PIECES, shapeOf } from './pieces.js';
 
-// Draw one cell with a beveled 3D look. Ghost cells are drawn flat & translucent.
+// ---- color helpers ----
+// Used by drawBlock to build a vertical light→dark gradient over
+// the piece color, which is what gives blocks their 3D rounded feel.
+function hexToRgb(hex) {
+  return [
+    parseInt(hex.slice(1, 3), 16),
+    parseInt(hex.slice(3, 5), 16),
+    parseInt(hex.slice(5, 7), 16),
+  ];
+}
+function lighten(hex, amount) {
+  const [r, g, b] = hexToRgb(hex);
+  return `rgb(${Math.round(r + (255 - r) * amount)},${Math.round(g + (255 - g) * amount)},${Math.round(b + (255 - b) * amount)})`;
+}
+function darken(hex, amount) {
+  const [r, g, b] = hexToRgb(hex);
+  return `rgb(${Math.round(r * (1 - amount))},${Math.round(g * (1 - amount))},${Math.round(b * (1 - amount))})`;
+}
+function withAlpha(hex, alpha) {
+  if (hex.startsWith('rgb')) return hex;
+  const [r, g, b] = hexToRgb(hex);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// Draw a single rounded "gem" block with gloss + drop shadow.
+// Works for any cell size — the board and the mini previews both use it.
+//   px, py  pixel position of the cell's top-left corner
+//   size    cell width/height in pixels
+//   color   fill color (hex or rgb string)
+//   ghost   if true, render the translucent ghost-piece variant
+export function drawBlock(ctx, px, py, size, color, ghost = false) {
+  // All sizes scale with the cell so this looks right in mini previews too.
+  const inset  = Math.max(1, size * 0.04);
+  const radius = Math.max(2, size * 0.18);
+  const x = px + inset;
+  const y = py + inset;
+  const w = size - inset * 2;
+  const h = size - inset * 2;
+
+  if (ghost) {
+    // Faintly glowing outline — same hue as the piece, no fill.
+    ctx.save();
+    ctx.shadowColor = color;
+    ctx.shadowBlur = Math.max(3, size * 0.25);
+    ctx.fillStyle = withAlpha(color, 0.08);
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, radius);
+    ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = withAlpha(color, 0.45);
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, radius);
+    ctx.stroke();
+    return;
+  }
+
+  // ---- Tetris Effect look ----
+  // Each block reads as a glowing piece of light: a colored bloom
+  // around the cell, a luminescent radial body, and a bright core
+  // spot near the top suggesting the light source is inside.
+
+  // 1. Outer glow — colored bloom around the block.
+  //    shadowColor inherits the piece hue so the halo matches.
+  ctx.save();
+  ctx.shadowColor   = color;
+  ctx.shadowBlur    = Math.max(4, size * 0.45);
+  ctx.shadowOffsetY = 0;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, radius);
+  ctx.fill();
+  ctx.restore();
+
+  // 2. Radial body gradient — bright core, fading to the base color
+  //    at the rim. This is the "light coming from inside" effect.
+  const cx = x + w * 0.5;
+  const cy = y + h * 0.45;
+  const radial = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(w, h) * 0.7);
+  radial.addColorStop(0,   lighten(color, 0.55));
+  radial.addColorStop(0.5, lighten(color, 0.15));
+  radial.addColorStop(1,   color);
+  ctx.fillStyle = radial;
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, radius);
+  ctx.fill();
+
+  // 3. Soft white sheen across the upper half (the "wet" gloss).
+  const glossGrad = ctx.createLinearGradient(x, y, x, y + h * 0.55);
+  glossGrad.addColorStop(0, 'rgba(255,255,255,0.28)');
+  glossGrad.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = glossGrad;
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, radius);
+  ctx.fill();
+
+  // 4. Bright core spot near the top — the "lit from within" highlight.
+  //    Clipped to the cell so the soft fall-off respects the rounded shape.
+  ctx.save();
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, radius);
+  ctx.clip();
+  const spot = ctx.createRadialGradient(
+    cx, y + h * 0.28, 0,
+    cx, y + h * 0.28, w * 0.45
+  );
+  spot.addColorStop(0,   'rgba(255,255,255,0.7)');
+  spot.addColorStop(0.4, 'rgba(255,255,255,0.18)');
+  spot.addColorStop(1,   'rgba(255,255,255,0)');
+  ctx.fillStyle = spot;
+  ctx.fillRect(x, y, w, h);
+  ctx.restore();
+}
+
+// Backwards-compatible board-cell wrapper (cell coords → pixels at BLOCK size).
 export function drawCell(ctx, x, y, color, ghost = false) {
-  const px = x * BLOCK;
-  const py = y * BLOCK;
-  ctx.fillStyle = ghost ? COLORS.GHOST : color;
-  ctx.fillRect(px, py, BLOCK, BLOCK);
-  if (ghost) return;
-  // top + left highlight
-  ctx.fillStyle = 'rgba(255,255,255,0.25)';
-  ctx.fillRect(px, py, BLOCK, 3);
-  ctx.fillRect(px, py, 3, BLOCK);
-  // bottom + right shadow
-  ctx.fillStyle = 'rgba(0,0,0,0.25)';
-  ctx.fillRect(px, py + BLOCK - 3, BLOCK, 3);
-  ctx.fillRect(px + BLOCK - 3, py, 3, BLOCK);
+  drawBlock(ctx, x * BLOCK, y * BLOCK, BLOCK, color, ghost);
 }
 
 // Paint the main playfield: background, grid lines, locked blocks,
@@ -157,14 +259,7 @@ export function drawMini(canvas, ctx, type) {
       if (!shape[r][cc]) continue;
       const x = offX + (cc - minC) * cell;
       const y = offY + (r  - minR) * cell;
-      ctx.fillStyle = COLORS[type];
-      ctx.fillRect(x, y, cell, cell);
-      ctx.fillStyle = 'rgba(255,255,255,0.25)';
-      ctx.fillRect(x, y, cell, 2);
-      ctx.fillRect(x, y, 2, cell);
-      ctx.fillStyle = 'rgba(0,0,0,0.25)';
-      ctx.fillRect(x, y + cell - 2, cell, 2);
-      ctx.fillRect(x + cell - 2, y, 2, cell);
+      drawBlock(ctx, x, y, cell, COLORS[type]);
     }
   }
 }
