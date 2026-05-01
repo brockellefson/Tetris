@@ -20,6 +20,7 @@ import fill      from './fill.js';
 import flip      from './flip.js';
 import tired     from './tired.js';
 import slick     from './slick.js';
+import whoops    from './whoops.js';
 
 export const ALL_POWERUPS = [
   hold,
@@ -35,6 +36,7 @@ export const ALL_POWERUPS = [
   flip,
   tired,
   slick,
+  whoops,
 ];
 
 // Pick up to `count` random eligible power-ups for the choice menu.

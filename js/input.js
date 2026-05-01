@@ -17,6 +17,7 @@
 //   A           spend a Chisel charge (if banked)
 //   S           spend a Fill charge (if banked)
 //   F           spend a Flip charge (if banked) — mirrors the active piece
+//   W           spend the Whoops charge (if banked) — undoes the last piece
 //   P           pause
 //   R           restart
 //
@@ -38,11 +39,16 @@ export function setupInput(game, callbacks = {}) {
       return;
     }
 
-    // After game over, only R restarts
+    // After game over, R restarts and W revives (if the player has
+    // a banked Whoops charge — undoes the lock that triggered the
+    // spawn-collision death). All other keys are inert.
     if (game.gameOver) {
       if (e.key === 'r' || e.key === 'R') {
         game.start();
         callbacks.onStart?.();
+      } else if (e.key === 'w' || e.key === 'W') {
+        e.preventDefault();
+        game.tryActivateWhoops();
       }
       return;
     }
@@ -206,6 +212,15 @@ export function setupInput(game, callbacks = {}) {
         // collide at the current position.
         e.preventDefault();
         game.tryActivateFlip();
+        break;
+      case 'w': case 'W':
+        // Spend the banked Whoops charge — rewinds to before the
+        // most recently locked piece and respawns it. tryActivateWhoops
+        // refuses (no charge spent) if the player has no charge,
+        // no lock has happened yet this run, or gameplay is otherwise
+        // frozen by a menu / chisel / fill session.
+        e.preventDefault();
+        game.tryActivateWhoops();
         break;
       case 'p': case 'P':
         e.preventDefault();

@@ -190,6 +190,19 @@ function showPowerUpMenu() {
   // already shuffles, so zipping the two arrays yields a fresh random
   // (powerup, curse) pairing every time the menu opens.
   const curses = pickCurseChoices(game, powerups.length);
+
+  // Forbid Tired + Hyped on the same card — they cancel out, so the
+  // pick would be a free no-op trade. If we land on that pairing, swap
+  // the Hyped curse into another slot. Tired is unique in the powerup
+  // pool, so any other index is guaranteed conflict-free.
+  const tiredIdx = powerups.findIndex(p => p.id === 'tired');
+  if (tiredIdx !== -1 && curses[tiredIdx]?.id === 'curse-hyped') {
+    const swapIdx = curses.findIndex((c, i) => i !== tiredIdx && c?.id !== 'curse-hyped');
+    if (swapIdx !== -1) {
+      [curses[tiredIdx], curses[swapIdx]] = [curses[swapIdx], curses[tiredIdx]];
+    }
+  }
+
   const choices = powerups.map((powerup, i) => ({
     powerup,
     // Fall back gracefully if somehow there are fewer eligible curses
@@ -314,6 +327,11 @@ function syncBlessingsUI() {
     tags.push(game.unlocks.flipCharges > 1
       ? `FLIP ×${game.unlocks.flipCharges}`
       : 'FLIP');
+  }
+  // Whoops is capped at 1, so no ×N variant needed — just a plain
+  // tag while the charge is banked. Drops off the moment W is spent.
+  if (game.unlocks.whoopsCharges > 0) {
+    tags.push('WHOOPS');
   }
 
   blessingSection$.classList.toggle('hidden', tags.length === 0);

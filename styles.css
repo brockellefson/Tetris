@@ -494,7 +494,7 @@ canvas { display: block; }
 
 .powerup-card {
   background: linear-gradient(180deg, rgba(42, 0, 68, 0.92) 0%, rgba(20, 0, 43, 0.92) 100%);
-  border: 1px solid var(--neon-violet);
+  border: 2px solid var(--neon-violet);
   border-radius: 6px;
   padding: 24px 18px;
   width: 200px;
@@ -529,7 +529,6 @@ canvas { display: block; }
 }
 
 .powerup-card.selected {
-  border-width: 2px;
   box-shadow:
     0 0 18px var(--neon-cyan),
     0 0 48px rgba(0, 245, 255, 0.7),

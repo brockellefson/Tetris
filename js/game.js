@@ -18,6 +18,7 @@ import {
   B2B_MULTIPLIER, COMBO_BONUS, PERFECT_CLEAR_BONUS,
   LOCK_DELAY,
   MAX_CHISEL_CHARGES, MAX_FILL_CHARGES, MAX_FLIP_CHARGES,
+  MAX_WHOOPS_CHARGES,
 } from './constants.js';
 import { newBoard, collides, lockPiece, findFullRows, removeRows } from './board.js';
 import { spawn, tryMove, tryRotate, tryFlip, ghostPosition } from './piece.js';
@@ -86,7 +87,36 @@ export class Game {
       // Flip — banked horizontal mirror of the active piece.
       // Pressing F spends one. Capped at MAX_FLIP_CHARGES.
       flipCharges: 0,
+      // Whoops — banked one-shot rewind of the active piece. Pressing
+      // W restores the world to just before the current piece spawned
+      // (board, score, queue, hold, combo, level, pendingChoices, etc.)
+      // and respawns that piece type fresh. Capped at MAX_WHOOPS_CHARGES.
+      whoopsCharges: 0,
     };
+    // Whoops uses a two-stage snapshot system:
+    //
+    //   prePieceSnapshot  — captured at the top of every spawnNext().
+    //                       Reflects the world right before the
+    //                       *currently active* piece existed. By itself
+    //                       it would only let Whoops undo the in-flight
+    //                       piece (rarely useful — you can just rotate
+    //                       and try again).
+    //
+    //   whoopsSnapshot    — the actual undo target. Promoted from
+    //                       prePieceSnapshot at the top of lockCurrent()
+    //                       (i.e., the moment a piece commits). Survives
+    //                       the next spawn, so pressing W during the
+    //                       *next* piece (or during the line-clear
+    //                       animation, or after a spawn-collision game
+    //                       over) rewinds to before the just-locked
+    //                       piece — which is what "undo your last
+    //                       piece" actually means to the player.
+    //
+    // Both are captured unconditionally regardless of whether the
+    // player owns Whoops, so picking the card mid-run works on the
+    // very next lock instead of needing to "arm" first.
+    this.prePieceSnapshot = null;
+    this.whoopsSnapshot   = null;
     // Slick power-up timer. Counts up while the active piece is grounded
     // and Slick is unlocked; cleared on successful move/rotate, on spawn,
     // and after locking. Ignored entirely when `unlocks.slick` is false,
@@ -199,6 +229,72 @@ export class Game {
     // Slick lock-delay window so chaining flip + slide stays smooth.
     this.lockDelayTimer = 0;
     this.onFlip?.();                            // optional FX hook
+    return true;
+  }
+
+  // Try to spend the Whoops charge and rewind to just before the
+  // most recently locked piece spawned. Returns true on success.
+  //
+  // The undo target is `whoopsSnapshot`, which is promoted from
+  // `prePieceSnapshot` at the top of lockCurrent(). Pressing W
+  // when no piece has locked yet (very first piece of the run,
+  // before any commit) refuses — there's nothing to undo.
+  //
+  // Gating differs slightly from other powerups:
+  //   • Allowed during line-clear animation — we halt the animation
+  //     and roll back, since the clear belongs to the piece being
+  //     undone. The snapshot predates the clear, so the cleared
+  //     rows come back automatically as part of the board restore.
+  //   • Allowed from gameOver — the clutch use of Whoops is undoing
+  //     the lock that led to a spawn-collision death.
+  //   • Refused while paused, while a powerup choice menu is up,
+  //     and while a chisel/fill cell-pick session is in progress.
+  //     Those states own the input layer; rewinding under them
+  //     would desync the UI.
+  tryActivateWhoops() {
+    if (this.unlocks.whoopsCharges <= 0) return false;
+    if (!this.whoopsSnapshot) return false;
+    if (this.paused) return false;
+    if (this.pendingChoices > 0) return false;
+    if (this.chisel.active || this.chisel.target) return false;
+    if (this.fill.active || this.fill.target) return false;
+    const s = this.whoopsSnapshot;
+    // Restore world state. Board and queue are deep-copied on
+    // capture, so assigning the snapshot's references directly
+    // would let later mutations alias the snapshot — copy again.
+    this.board              = s.board.map(row => row.slice());
+    this.queue              = s.queue.slice();
+    this.hold               = s.hold;
+    this.canHold            = s.canHold;
+    this.score              = s.score;
+    this.lines              = s.lines;
+    this.level              = s.level;
+    this.combo              = s.combo;
+    this.lastClearWasTetris = s.lastClearWasTetris;
+    this.firstClearAwarded  = s.firstClearAwarded;
+    this.pendingChoices     = s.pendingChoices;
+    // Halt any in-progress line-clear animation — restoring the
+    // pre-clear board makes the flash visually wrong, and tick()
+    // would otherwise call completeClear() on a board that no
+    // longer has full rows to remove.
+    this.clearingRows = [];
+    this.clearTimer = 0;
+    // Same for fill.savedPiece — if the rewind cancels a fill-
+    // triggered clear, there's no saved piece to restore later.
+    this.fill.savedPiece = null;
+    // Bring the run back from the dead if the collision happened
+    // on the spawn following the undone lock.
+    this.gameOver = false;
+    // Drop both snapshots so spawnNext can capture fresh state
+    // from the just-restored world without aliasing or treating
+    // pre-restore data as the new "undo target."
+    this.whoopsSnapshot   = null;
+    this.prePieceSnapshot = null;
+    this.lockDelayTimer = 0;
+    this.dropTimer = 0;
+    this.spawnNext();
+    this.unlocks.whoopsCharges -= 1;
+    this.onWhoops?.();
     return true;
   }
 
@@ -547,6 +643,29 @@ export class Game {
 
   spawnNext() {
     this.refillQueue();
+    // Whoops snapshot — captured BEFORE the queue shift / spawn so
+    // that restoring it puts the about-to-spawn piece type back at
+    // queue[0] and the world looks exactly as it did one frame
+    // before this piece existed. Captures everything the line-clear
+    // path can mutate (board, score, lines/level, combo, B2B,
+    // pendingChoices, firstClearAwarded) plus the carry-state
+    // (queue, hold, canHold) so an undo across a hold-swap or a
+    // milestone-crossing clear is fully reversible.
+    const peekedType = this.queue[0];
+    this.prePieceSnapshot = {
+      board:              this.board.map(row => row.slice()),
+      queue:              this.queue.slice(),
+      hold:               this.hold,
+      canHold:            this.canHold,
+      score:              this.score,
+      lines:              this.lines,
+      level:              this.level,
+      combo:              this.combo,
+      lastClearWasTetris: this.lastClearWasTetris,
+      firstClearAwarded:  this.firstClearAwarded,
+      pendingChoices:     this.pendingChoices,
+      pieceType:          peekedType,
+    };
     const type = this.queue.shift();
     this.current = spawn(type);
     this.canHold = true;
@@ -623,7 +742,16 @@ export class Game {
       this.current = spawn(this.hold);
       if (collides(this.board, this.current)) this.gameOver = true;
     } else {
+      // First-hold branch: stash the held piece and pull the next from
+      // the queue. spawnNext would normally overwrite prePieceSnapshot,
+      // but for Whoops semantics this hold action shouldn't replace
+      // the undo target — pressing W should rewind to before the
+      // *held* piece existed (returning the held piece to play, with
+      // the just-shifted piece going back to the front of the queue).
+      // Save & restore the snapshot around the call.
+      const savedSnapshot = this.prePieceSnapshot;
       this.spawnNext();
+      this.prePieceSnapshot = savedSnapshot;
     }
     this.hold = t;
     this.canHold = false;
@@ -632,6 +760,17 @@ export class Game {
   // -------- Lock & line clear --------
 
   lockCurrent() {
+    // Whoops bookmark — the moment a piece commits, promote the
+    // pre-spawn snapshot to the undo target. This is what lets the
+    // player press W *after* the next piece has already spawned and
+    // still rewind to before THIS piece. The snapshot itself was
+    // taken at spawn time, so it predates any soft/hard-drop scoring
+    // and any clears this lock is about to trigger — restoring it
+    // unwinds all of those in one assignment.
+    if (this.prePieceSnapshot) {
+      this.whoopsSnapshot = this.prePieceSnapshot;
+    }
+
     lockPiece(this.board, this.current);
     this.triggerShake(SHAKE_LOCK); // small bounce on every placement
     this.onLock?.(); // optional sound / FX hook (set by main.js)

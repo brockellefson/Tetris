@@ -97,6 +97,13 @@ export const MAX_FILL_CHARGES = 3;
 // Chisel and Fill.
 export const MAX_FLIP_CHARGES = 3;
 
+// Whoops — banked consumable that rewinds the world to just before
+// the active piece spawned. Pressing W spends the charge. Capped at
+// 1 because it's a strong "take-back" effect: stacking would let the
+// player undo arbitrarily far back, which trivializes mistakes. Once
+// the player has a charge, the Whoops card no longer surfaces.
+export const MAX_WHOOPS_CHARGES = 1;
+
 // Slick power-up — milliseconds a grounded piece can sit before locking,
 // giving the player a window to make split-second adjustments. The timer
 // resets on every successful move/rotate (step reset), so chained inputs
