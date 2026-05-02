@@ -273,6 +273,123 @@ export function playClearSound(lineCount) {
   }
 }
 
+// Soft "ping" played when the mouse hovers over the main-menu Play
+// button. A single short triangle blip at G5 with a tiny detuned partner
+// for shimmer — quieter and higher than the in-menu cycle blip so the
+// two cues can't be confused. Very short envelope so swiping the cursor
+// across the button doesn't pile up a buzz.
+export function playMenuHoverSound() {
+  const ac = getCtx();
+  const now = ac.currentTime;
+  const dur = 0.18;
+
+  const env = ac.createGain();
+  env.gain.setValueAtTime(0, now);
+  env.gain.linearRampToValueAtTime(0.06, now + 0.008);
+  env.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+  const lpf = ac.createBiquadFilter();
+  lpf.type = 'lowpass';
+  lpf.frequency.value = 4000;
+  lpf.Q.value = 0.6;
+  lpf.connect(env);
+  env.connect(ac.destination);
+
+  // Pair of detuned triangles for a soft shimmery ping.
+  const freq = 783.99; // G5
+  const osc1 = ac.createOscillator();
+  osc1.type = 'triangle';
+  osc1.frequency.value = freq;
+  osc1.connect(lpf);
+
+  const osc2 = ac.createOscillator();
+  osc2.type = 'triangle';
+  osc2.frequency.value = freq * 1.005;
+  const detune = ac.createGain();
+  detune.gain.value = 0.5;
+  osc2.connect(detune);
+  detune.connect(lpf);
+
+  osc1.start(now);
+  osc2.start(now);
+  osc1.stop(now + dur + 0.02);
+  osc2.stop(now + dur + 0.02);
+}
+
+// Big "GO" chime played when the player clicks Play (or hits Enter on
+// the splash). A confident ascending three-note arpeggio (C5 → E5 → G5
+// → C6) with a sub-bass thump underneath — bigger than the power-up
+// select chime, so starting the game feels like an event rather than a
+// menu confirmation. Sits alongside playTheme() kicking in, so the gain
+// stays moderate to leave room for the music swell.
+export function playMenuStartSound() {
+  const ac = getCtx();
+  const now = ac.currentTime;
+  const dur = 0.55;
+
+  // ----- Master tone path -----
+  const env = ac.createGain();
+  env.gain.setValueAtTime(0, now);
+  env.gain.linearRampToValueAtTime(0.16, now + 0.01);
+  env.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+  const lpf = ac.createBiquadFilter();
+  lpf.type = 'lowpass';
+  // Sweep brighter as the chord opens — adds the "lift-off" feel.
+  lpf.frequency.setValueAtTime(1200, now);
+  lpf.frequency.exponentialRampToValueAtTime(4000, now + 0.25);
+  lpf.Q.value = 0.7;
+  lpf.connect(env);
+  env.connect(ac.destination);
+
+  // Ascending C-major arpeggio — the same pentatonic family used
+  // everywhere else, so this chime is sonically related to the
+  // gameplay sounds.
+  const notes = [
+    { freq: 523.25,  t: 0.00 },  // C5
+    { freq: 659.25,  t: 0.07 },  // E5
+    { freq: 783.99,  t: 0.14 },  // G5
+    { freq: 1046.50, t: 0.22 },  // C6
+  ];
+  for (const { freq, t } of notes) {
+    const osc1 = ac.createOscillator();
+    osc1.type = 'sine';
+    osc1.frequency.value = freq;
+    osc1.connect(lpf);
+
+    const osc2 = ac.createOscillator();
+    osc2.type = 'sine';
+    osc2.frequency.value = freq * 1.005;
+    const detune = ac.createGain();
+    detune.gain.value = 0.5;
+    osc2.connect(detune);
+    detune.connect(lpf);
+
+    osc1.start(now + t);
+    osc2.start(now + t);
+    osc1.stop(now + t + 0.4);
+    osc2.stop(now + t + 0.4);
+  }
+
+  // ----- Sub-bass thump for weight -----
+  // Quick A2 → A1 drop on a sine — gives the chime a launchy bottom
+  // end without competing with the gameplay tones.
+  const subEnv = ac.createGain();
+  subEnv.gain.setValueAtTime(0, now);
+  subEnv.gain.linearRampToValueAtTime(0.18, now + 0.01);
+  subEnv.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+
+  const sub = ac.createOscillator();
+  sub.type = 'sine';
+  sub.frequency.setValueAtTime(110, now);
+  sub.frequency.exponentialRampToValueAtTime(55, now + 0.18);
+  sub.connect(subEnv);
+  subEnv.connect(ac.destination);
+
+  sub.start(now);
+  sub.stop(now + 0.3);
+}
+
 // Sharp "crack" played when a chisel removes a block. A short bandpass
 // noise burst gives the chip-of-stone texture, and a fast downward
 // pitch sweep on a square wave adds the percussive "snap" so the cue

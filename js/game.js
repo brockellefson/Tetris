@@ -20,6 +20,7 @@ import {
   GRAVITY_POWER_STEP,
   MAX_CHISEL_CHARGES, MAX_FILL_CHARGES, MAX_FLIP_CHARGES,
   MAX_WHOOPS_CHARGES,
+  COLS,
 } from './constants.js';
 import { newBoard, collides, lockPiece, findFullRows, removeRows } from './board.js';
 import { spawn, tryMove, tryRotate, tryFlip, ghostPosition } from './piece.js';
@@ -574,6 +575,26 @@ export class Game {
   addColumn() {
     for (const row of this.board) row.push(null);
     return this.board[0].length;
+  }
+
+  // Inverse of addColumn — used by the Dispell blessing when undoing a
+  // Growth stack. Refuses (and returns false) if shrinking would clip
+  // either a locked block or any cell of the active piece, so it can
+  // never trap or game-over the player. Also clamps at the default
+  // COLS so we never go narrower than a stock board. Returns true iff
+  // the column was actually removed.
+  tryRemoveColumn() {
+    if (!this.board.length) return false;
+    if (this.board[0].length <= COLS) return false;
+    const lastCol = this.board[0].length - 1;
+    if (this.board.some(row => row[lastCol] !== null)) return false;
+    if (this.current) {
+      for (let r = 0; r < this.board.length; r++) {
+        if (this.isCellUnderActivePiece(lastCol, r)) return false;
+      }
+    }
+    for (const row of this.board) row.pop();
+    return true;
   }
 
   // Push a junk row onto the bottom of the board, shifting everything

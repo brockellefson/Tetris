@@ -64,7 +64,7 @@
       <div id="board-wrap">
         <canvas id="board" width="300" height="600"></canvas>
         <div id="notifications"></div>
-        <div id="overlay">PRESS ANY KEY<small>TO START</small></div>
+        <div id="overlay" class="hidden">PAUSED<small>PRESS P TO RESUME</small></div>
       </div>
 
       <div>
@@ -93,6 +93,25 @@
       <kbd>A</kbd><span>chisel</span>
       <kbd>S</kbd><span>fill</span>
       <kbd>F</kbd><span>flip</span>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       Main menu screen — full-viewport title splash shown on initial
+       page load. Sits above the synthwave background but below the
+       power-up modal. The Play button (or any key press) hides it
+       and kicks off the game via the same path as the original
+       "PRESS ANY KEY TO START" overlay. After the game starts, the
+       menu does not return — game-over uses the in-board overlay.
+       ============================================================ -->
+  <div id="menu-screen">
+    <div class="menu-inner">
+      <h1 class="menu-title" aria-label="Stackoverflow">
+        <span class="menu-title-text">STACKOVERFLOW</span>
+      </h1>
+      <button id="play-btn" class="menu-btn" type="button">
+        <span class="menu-btn-text">PLAY</span>
+      </button>
     </div>
   </div>
 

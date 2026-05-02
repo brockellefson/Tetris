@@ -691,6 +691,158 @@ canvas { display: block; }
 }
 
 /* ============================================================
+   Main menu screen — title splash + play button
+   ============================================================
+   Full-viewport overlay shown on initial page load. Sits above the
+   synthwave background (z-index 50) but below the power-up modal
+   (z-index 100) so a power-up choice can never be hidden behind it.
+   The dim radial gradient softens the busy background so the title
+   reads cleanly, while still letting the sun bloom and grid scroll
+   through. ============================================================ */
+#menu-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(ellipse at center, rgba(26, 0, 51, 0.55) 0%, rgba(8, 0, 26, 0.85) 100%);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  animation: menu-fade 0.4s ease-out;
+}
+#menu-screen.hidden { display: none; }
+
+.menu-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 60px;
+  padding: 40px;
+}
+
+/* ---- Title — "STACKOVERFLOW" in the Blood Dragon style ----
+   Hot-pink fill, thick cyan outline, a stack of darker shadows for a
+   3D extruded slab, plus an outer pink bloom so it glows like a neon
+   sign. Slight horizontal skew gives it the same forward-leaning
+   energy as the reference. The drop-shadow filter doubles up the
+   bloom because text-shadow alone can't escape the glyph silhouette.
+*/
+.menu-title {
+  font-family: 'Orbitron', sans-serif;
+  font-weight: 900;
+  /* "STACKOVERFLOW" is 13 glyphs wide — sized to fit comfortably on
+     even narrow viewports without spilling past the gutters. The vw
+     unit lets it scale up on big monitors without ever going past the
+     90px ceiling that would force wrapping. */
+  font-size: clamp(28px, 6vw, 90px);
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  text-align: center;
+  margin: 0;
+  /* Cap width and let the browser shrink whitespace if a tiny viewport
+     still squeezes things — keeps the glyphs from clipping the edges. */
+  max-width: 92vw;
+  white-space: nowrap;
+  /* Slight forward lean — mimics the airbrushed action-movie title
+     without committing to a full italic (Orbitron has no italic cut). */
+  transform: skewX(-6deg);
+  animation: menu-title-flicker 5s ease-in-out infinite;
+}
+
+.menu-title-text {
+  display: inline-block;
+  color: var(--neon-pink);
+  /* Layered text-shadow stack:
+       1) 8 cyan offsets → fakes a chunky 2px cyan stroke around each glyph
+       2) Three deep-violet drop steps → 3D extruded slab going down-right
+       3) Three pink halos at growing radii → neon-tube bloom               */
+  text-shadow:
+    /* cyan stroke */
+    -2px -2px 0 var(--neon-cyan),
+     2px -2px 0 var(--neon-cyan),
+    -2px  2px 0 var(--neon-cyan),
+     2px  2px 0 var(--neon-cyan),
+     0   -2px 0 var(--neon-cyan),
+     0    2px 0 var(--neon-cyan),
+    -2px  0   0 var(--neon-cyan),
+     2px  0   0 var(--neon-cyan),
+    /* 3D extrusion in deep violet — gives the slab depth */
+     4px  4px 0 #2a0044,
+     7px  7px 0 #1a0033,
+    10px 10px 0 #08001a,
+    /* outer neon bloom */
+     0 0 18px var(--neon-pink),
+     0 0 38px rgba(255, 42, 146, 0.85),
+     0 0 80px rgba(255, 42, 146, 0.55);
+  filter:
+    drop-shadow(0 0 24px rgba(255, 42, 146, 0.45))
+    drop-shadow(0 0 60px rgba(176, 38, 255, 0.35));
+}
+
+/* CRT-style flicker on the big neon title — same idea as the in-game
+   overlay, but slower so it reads as a confident neon sign rather than
+   a dying tube. */
+@keyframes menu-title-flicker {
+  0%, 100%       { opacity: 1; }
+  43%, 47%, 51%  { opacity: 1; }
+  45%            { opacity: 0.88; }
+  49%            { opacity: 0.94; }
+}
+
+/* ---- Play button ----
+   Matches the synthwave panel language — violet glassy fill, hot-pink
+   border, cyan text — but pumped up: bigger padding, heavier glow, and
+   a hover state that swaps the border and text to cyan and lifts the
+   button slightly so it feels clickable. */
+.menu-btn {
+  background: linear-gradient(180deg, rgba(42, 0, 68, 0.92) 0%, rgba(20, 0, 43, 0.92) 100%);
+  border: 2px solid var(--neon-pink);
+  border-radius: 6px;
+  padding: 18px 64px;
+  cursor: pointer;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: 8px;
+  text-transform: uppercase;
+  color: var(--neon-cyan);
+  text-shadow:
+    0 0 8px var(--neon-cyan),
+    0 0 18px rgba(0, 245, 255, 0.7);
+  box-shadow:
+    0 0 10px rgba(255, 42, 146, 0.6),
+    0 0 28px rgba(255, 42, 146, 0.35),
+    inset 0 0 16px rgba(176, 38, 255, 0.25);
+  transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s, color 0.15s;
+}
+
+.menu-btn:hover,
+.menu-btn:focus {
+  outline: none;
+  border-color: var(--neon-cyan);
+  transform: translateY(-3px);
+  box-shadow:
+    0 0 16px var(--neon-cyan),
+    0 0 40px rgba(0, 245, 255, 0.55),
+    0 0 70px rgba(255, 42, 146, 0.35),
+    inset 0 0 18px rgba(0, 245, 255, 0.2);
+}
+
+.menu-btn:active {
+  transform: translateY(-1px);
+}
+
+/* Respect users with reduced-motion preferences — no flicker on the
+   title, no fade-in on the screen. */
+@media (prefers-reduced-motion: reduce) {
+  .menu-title { animation: none; }
+  #menu-screen { animation: none; }
+}
+
+/* ============================================================
    Chisel power-up — board cursor + hint banner
    ============================================================ */
 #board-wrap.chiseling { cursor: crosshair; }

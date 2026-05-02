@@ -9,7 +9,7 @@
 import { Game } from './game.js';
 import { drawBoard, drawMini } from './render.js';
 import { setupInput } from './input.js';
-import { playLockSound, playClearSound, playCycleSound, playSelectSound, playMenuOpenSound, playChiselSound, playFillSound, playFlipSound } from './sound.js';
+import { playLockSound, playClearSound, playCycleSound, playSelectSound, playMenuOpenSound, playMenuHoverSound, playMenuStartSound, playChiselSound, playFillSound, playFlipSound } from './sound.js';
 import { pickChoices } from './powerups/index.js';
 import { pickCurseChoices } from './curses/index.js';
 import { COLS, ROWS, BLOCK } from './constants.js';
@@ -33,6 +33,8 @@ const holdPanel$    = document.getElementById('hold-panel');
 const nextPanel$    = document.getElementById('next-panel');
 const powerupMenu$    = document.getElementById('powerup-menu');
 const powerupCards$   = document.getElementById('powerup-cards');
+const menuScreen$     = document.getElementById('menu-screen');
+const playBtn$        = document.getElementById('play-btn');
 const blessingSection$ = document.getElementById('blessing-section');
 const blessingList$    = document.getElementById('blessing-list');
 const curseSection$   = document.getElementById('curse-section');
@@ -79,15 +81,21 @@ function buildChoiceMenu({ choices, onPick }) {
     const { powerup, curse } = pair;
     const card = document.createElement('button');
     card.className = 'powerup-card';
+    // No-curse blessings (e.g. Dispell) render with the buff half only.
+    // Crucially, we must skip the curse template entirely — it interpolates
+    // `${curse.name}` and would crash on a null curse otherwise.
+    const cursePart = curse
+      ? `
+      <div class="powerup-card-curse">
+        <div class="powerup-card-curse-name">${curse.name}</div>
+        <div class="powerup-card-curse-desc">${curse.description}</div>
+      </div>`
+      : '';
     card.innerHTML = `
       <div class="powerup-card-buff">
         <div class="powerup-card-name">${powerup.name}</div>
         <div class="powerup-card-desc">${powerup.description}</div>
-      </div>
-      <div class="powerup-card-curse">
-        <div class="powerup-card-curse-name">${curse.name}</div>
-        <div class="powerup-card-curse-desc">${curse.description}</div>
-      </div>
+      </div>${cursePart}
       <div class="powerup-card-key"><kbd>${i + 1}</kbd></div>
     `;
     card.addEventListener('click', () => pick(pair));
@@ -222,11 +230,13 @@ function showPowerUpMenu() {
 
   const choices = powerups.map((powerup, i) => ({
     powerup,
-    // Fall back gracefully if somehow there are fewer eligible curses
-    // than power-ups (curses are all always-available today, so this
-    // is purely defensive). A null curse means picking the card just
-    // applies the power-up cleanly with no debuff.
-    curse: curses[i % Math.max(curses.length, 1)] ?? null,
+    // Blessings flagged `noCurse` (e.g. Dispell) intentionally carry no
+    // bundled curse — picking them is a pure positive. Otherwise fall
+    // back gracefully if somehow there are fewer eligible curses than
+    // power-ups (curses are all always-available today, so the `?? null`
+    // branch is purely defensive). A null curse means picking the card
+    // just applies the power-up cleanly with no debuff.
+    curse: powerup.noCurse ? null : (curses[i % Math.max(curses.length, 1)] ?? null),
   }));
   buildChoiceMenu({
     choices,
@@ -439,11 +449,56 @@ function pauseTheme() {
   themeMusic$.pause();
 }
 
+// Hide the splash screen the very first time the game starts, and on
+// every restart afterwards (the menu is only meant for initial boot,
+// so subsequent R-restarts simply keep it hidden).
+function hideMenuScreen() {
+  menuScreen$.classList.add('hidden');
+}
+
 setupInput(game, {
-  onStart:  () => { hideOverlay(); clearMenus(); playTheme(); },
+  onStart:  () => { hideOverlay(); clearMenus(); hideMenuScreen(); playTheme(); },
   onPause:  () => { showOverlay('PAUSED', 'PRESS P TO RESUME'); pauseTheme(); },
   onResume: () => { hideOverlay(); playTheme(); },
 });
+
+// Play button on the splash screen — same start path as the first
+// keypress in input.js. Wrapped in a guard so a stray double-click
+// after the game has already begun is a harmless no-op. The hover
+// chime gives the button some life, and the start chime fires
+// alongside the theme music swelling in.
+playBtn$.addEventListener('mouseenter', () => {
+  // Only ping while the splash is actually on screen — once the game
+  // has started, the button is hidden and any lingering hover events
+  // shouldn't trigger sound.
+  if (game.started) return;
+  playMenuHoverSound();
+});
+playBtn$.addEventListener('click', () => {
+  if (game.started) return;
+  // Fire the start chime *before* game.start() so the AudioContext
+  // unlock latency doesn't push it noticeably behind the theme.
+  playMenuStartSound();
+  game.start();
+  hideOverlay();
+  clearMenus();
+  hideMenuScreen();
+  playTheme();
+});
+
+// Keyboard parity with the click path — pressing Enter or Space while
+// the splash is up should also play the start chime, then fall through
+// to input.js's first-keypress handler which calls game.start().
+// We listen in capture phase so we run before input.js (which is on
+// document, bubble phase) — that way the chime is already scheduled
+// even though both handlers act on the same key event.
+document.addEventListener('keydown', (e) => {
+  if (game.started) return;
+  if (menuScreen$.classList.contains('hidden')) return;
+  if (e.key === 'Enter' || e.key === ' ') {
+    playMenuStartSound();
+  }
+}, { capture: true });
 
 // -------- Chisel / Fill power-ups — pick a cell on the board --------
 // Translate a click on the board canvas into a (col, row) and let
