@@ -74,6 +74,13 @@ function captureSnapshot(game) {
     // restore + spawnNext() reproduces the exact same draw order.
     queue:              [game.current.type, ...game.queue],
     hold:               game.hold,
+    // Hold's specials slot — preserved alongside `hold` so a rewind
+    // brings back not just the held piece type but its tagged mino.
+    // Deep-cloned so later mutations on the live array can't alias
+    // the snapshot.
+    holdSpecials:       game.holdSpecials
+                          ? game.holdSpecials.map(s => ({ ...s }))
+                          : null,
     canHold:            game.canHold,
     score:              game.score,
     lines:              game.lines,
@@ -156,6 +163,9 @@ export default {
     }
     game.queue              = s.queue.slice();
     game.hold               = s.hold;
+    game.holdSpecials       = s.holdSpecials
+                                ? s.holdSpecials.map(sp => ({ ...sp }))
+                                : null;
     game.canHold            = s.canHold;
     game.score              = s.score;
     game.lines              = s.lines;

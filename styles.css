@@ -447,6 +447,20 @@ canvas { display: block; }
 .notification.combo   { font-size: 18px; color: var(--neon-cyan); }
 .notification.tetris  { font-size: 26px; color: var(--neon-yellow); }
 .notification.b2b     { font-size: 26px; color: var(--neon-pink); }
+/* Special-block destruction bonus. Sized between combo and tetris so
+   stacked notifications (a Tetris that detonated a Bomb) read as
+   "the line clear is the headline, the destruction bonus is the
+   add-on." Color leans gold/orange to evoke the "+points" bursts in
+   classic arcade games. */
+.notification.special {
+  font-size: 22px;
+  color: var(--neon-yellow);
+  text-shadow:
+    0 0 6px var(--neon-yellow),
+    0 0 16px #ff8a1a,
+    -1px 0 4px var(--neon-pink),
+    1px 0 4px #ff8a1a;
+}
 .notification.perfect {
   font-size: 32px;
   color: var(--neon-yellow);

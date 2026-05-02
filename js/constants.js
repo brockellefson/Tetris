@@ -149,3 +149,17 @@ export const SPECIAL_RARITY_WEIGHTS = {
   rare:      2,
   legendary: 1,
 };
+
+// Points awarded per cell destroyed via the onCellRemoved hook
+// (Bomb blast cells, Lightning column cells, Chisel hits, and any
+// future single-cell remover). Multiplied by the current level so
+// destruction stays meaningful at high levels without dwarfing line
+// clears (a 9-cell Bomb at level 5 pays 9 × 25 × 5 = 1,125, vs. a
+// Tetris at level 5 paying 800 × 5 = 4,000). Set to 0 to disable
+// destruction scoring entirely.
+//
+// The score awarded is intentionally separate from combo / B2B —
+// destruction isn't a row-clear, so threading it through those
+// chains would make the bonuses ambiguous. Line clears still score
+// normally on top of any destruction the trigger caused.
+export const SPECIAL_DESTROY_POINTS = 25;

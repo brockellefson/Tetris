@@ -26,6 +26,8 @@ import {
   playLockSound, playClearSound, playCycleSound, playMenuHoverSound,
   playMenuStartSound, playChiselSound, playFillSound, playFlipSound,
   playSpecialTriggerSound, playGravitySuckSound, playSpecialSpawnSound,
+  playBombSound, playLightningSound,
+  playGravitySpawnSound, playBombSpawnSound, playLightningSpawnSound,
 } from './sound.js';
 import { COLS, ROWS, BLOCK } from './constants.js';
 import { setupHUD } from './hud.js';
@@ -141,18 +143,37 @@ game.onRain = (n) => hud.notify(n > 1 ? `RAIN +${n}` : 'RAIN', 'b2b', 1300);
 // Specials don't import sound; sound doesn't know about specials;
 // main.js wires the two together.
 const SPECIAL_SPAWN_SOUNDS = {
-  // Gravity uses the generic shock for spawn — its identity is in the
-  // suction trigger sound, not the alert. Add per-kind overrides here
-  // when a future special wants a distinct spawn cue.
+  // Each special's spawn cue is themed to evoke what it does:
+  //   gravity   — heavy descending pulse (you can feel the weight loaded)
+  //   bomb      — fuse-lit tick + sizzle (something dangerous arrived)
+  //   lightning — static crackle + rising tesla-coil charge (electrified)
+  //
+  // Anything not listed here falls back to playSpecialSpawnSound (the
+  // generic electric jolt) — keeps newly-added specials immediately
+  // audible while the sound design lands.
+  gravity:   playGravitySpawnSound,
+  bomb:      playBombSpawnSound,
+  lightning: playLightningSpawnSound,
 };
 const SPECIAL_TRIGGER_SOUNDS = {
-  gravity: playGravitySuckSound,
+  gravity:   playGravitySuckSound,
+  bomb:      playBombSound,
+  lightning: playLightningSound,
 };
 game.onSpecialSpawn = (kind) => {
   (SPECIAL_SPAWN_SOUNDS[kind] || playSpecialSpawnSound)();
 };
 game.onSpecialTrigger = (kind /*, source */) => {
   (SPECIAL_TRIGGER_SOUNDS[kind] || playSpecialTriggerSound)();
+};
+// Floating "+N" notification when a special's trigger destroys cells.
+// `cells` is the total destroyed across the whole top-level trigger
+// (including chained specials), `points` is the score awarded for it
+// (already added to game.score by the specials plugin). Suppressed
+// for triggers that don't destroy anything (e.g., Gravity itself —
+// the cascade scores via the standard line-clear path).
+game.onSpecialDestroy = (_kind, cells, points) => {
+  hud.notify(`+${points.toLocaleString()}  (${cells} cells)`, 'special', 1500);
 };
 
 // -------- Background theme music --------
@@ -318,9 +339,15 @@ function frame(now) {
   _shakeWasZero = shakeIsZero;
 
   // Mini previews only need to repaint when the displayed piece
-  // changes (a piece locks, the player holds, or the queue shifts).
-  if (_lastHold !== game.hold) {
-    drawMini(hold$, holdCtx, game.hold);
+  // changes (a piece locks, the player holds, or the queue shifts) —
+  // EXCEPT when the held piece carries a special, in which case the
+  // cycling palette has to animate every frame just like the special
+  // does on the board. The cache is bypassed by always-redrawing
+  // when game.holdSpecials is non-null; the type-change check still
+  // covers the common no-special case.
+  const holdHasSpecial = !!(game.holdSpecials && game.holdSpecials.length > 0);
+  if (_lastHold !== game.hold || holdHasSpecial) {
+    drawMini(hold$, holdCtx, game.hold, game.holdSpecials);
     _lastHold = game.hold;
   }
   for (let i = 0; i < nextCanvases.length; i++) {

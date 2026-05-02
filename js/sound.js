@@ -766,6 +766,224 @@ export function playSpecialSpawnSound() {
   ring.stop(now + 0.22);
 }
 
+// "Heavy descending pulse" cue played when a piece carrying a Gravity
+// special spawns. The brief is "you can feel the weight loaded onto
+// the board" — a low sine that drops a fifth in pitch as a high
+// overtone rings on top, finishing with a soft sub thud. Reads as
+// portentous / heavy without being aggressive (unlike Bomb, which
+// SHOULD feel a bit dangerous on spawn).
+export function playGravitySpawnSound() {
+  const ac = getCtx();
+  const now = ac.currentTime;
+
+  // ----- Voice 1: low descending body (the weight) -----
+  const bodyEnv = ac.createGain();
+  bodyEnv.gain.setValueAtTime(0, now);
+  bodyEnv.gain.linearRampToValueAtTime(0.16, now + 0.02);
+  bodyEnv.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
+
+  const bodyLPF = ac.createBiquadFilter();
+  bodyLPF.type = 'lowpass';
+  bodyLPF.frequency.value = 1200;
+  bodyLPF.Q.value = 0.7;
+
+  const body = ac.createOscillator();
+  body.type = 'sine';
+  body.frequency.setValueAtTime(196.00, now);                // G3
+  body.frequency.exponentialRampToValueAtTime(98.00, now + 0.16); // G2
+  body.connect(bodyLPF);
+  bodyLPF.connect(bodyEnv);
+  bodyEnv.connect(ac.destination);
+
+  // ----- Voice 2: high ringing overtone (the gravitational signature) -----
+  // Two octaves above the body's resolved pitch — sounds like a soft
+  // bell sympathetically excited by the heavy descending tone.
+  const ringEnv = ac.createGain();
+  ringEnv.gain.setValueAtTime(0, now);
+  ringEnv.gain.linearRampToValueAtTime(0.06, now + 0.01);
+  ringEnv.gain.exponentialRampToValueAtTime(0.001, now + 0.30);
+
+  const ring = ac.createOscillator();
+  ring.type = 'sine';
+  ring.frequency.value = 1567.98; // G6
+  ring.connect(ringEnv);
+  ringEnv.connect(ac.destination);
+
+  // ----- Voice 3: sub-thud at the bottom -----
+  const subEnv = ac.createGain();
+  subEnv.gain.setValueAtTime(0, now + 0.12);
+  subEnv.gain.linearRampToValueAtTime(0.14, now + 0.14);
+  subEnv.gain.exponentialRampToValueAtTime(0.001, now + 0.30);
+
+  const sub = ac.createOscillator();
+  sub.type = 'sine';
+  sub.frequency.setValueAtTime(65.41, now + 0.12);  // C2
+  sub.frequency.exponentialRampToValueAtTime(41.20, now + 0.22); // E1
+  sub.connect(subEnv);
+  subEnv.connect(ac.destination);
+
+  body.start(now);
+  body.stop(now + 0.34);
+  ring.start(now);
+  ring.stop(now + 0.32);
+  sub.start(now + 0.12);
+  sub.stop(now + 0.32);
+}
+
+// "Fuse-lit sizzle" cue played when a piece carrying a Bomb special
+// spawns. Three layers — a sharp match-strike at the front, a
+// continuous high-frequency sizzle that fades over ~280 ms, and a
+// low ominous undertone. The sizzle is what makes the cue read as
+// "burning fuse" rather than just a one-shot tick. Total ~280 ms.
+export function playBombSpawnSound() {
+  const ac = getCtx();
+  const now = ac.currentTime;
+
+  // ----- Voice 1: match-strike tick (the spark of ignition) -----
+  const tickDur = 0.025;
+  const tickBuf = ac.createBuffer(1, Math.floor(ac.sampleRate * tickDur), ac.sampleRate);
+  const tdata = tickBuf.getChannelData(0);
+  for (let i = 0; i < tdata.length; i++) tdata[i] = Math.random() * 2 - 1;
+  const tick = ac.createBufferSource();
+  tick.buffer = tickBuf;
+
+  const tickBP = ac.createBiquadFilter();
+  tickBP.type = 'bandpass';
+  tickBP.frequency.value = 4500;
+  tickBP.Q.value = 1.0;
+
+  const tickEnv = ac.createGain();
+  tickEnv.gain.setValueAtTime(0.20, now);
+  tickEnv.gain.exponentialRampToValueAtTime(0.001, now + tickDur);
+
+  tick.connect(tickBP);
+  tickBP.connect(tickEnv);
+  tickEnv.connect(ac.destination);
+
+  // ----- Voice 2: continuous sizzle (the fuse burning) -----
+  // Filtered noise that fades from steady to silence — the steady
+  // attack-and-decay shape is what reads as "burning" rather than a
+  // single transient. Slightly delayed start so it follows the tick
+  // (you strike the match, THEN it sizzles).
+  const sizzleDur = 0.26;
+  const sizzleBuf = ac.createBuffer(1, Math.floor(ac.sampleRate * sizzleDur), ac.sampleRate);
+  const sdata = sizzleBuf.getChannelData(0);
+  for (let i = 0; i < sdata.length; i++) sdata[i] = Math.random() * 2 - 1;
+  const sizzle = ac.createBufferSource();
+  sizzle.buffer = sizzleBuf;
+
+  const sizzleBP = ac.createBiquadFilter();
+  sizzleBP.type = 'bandpass';
+  sizzleBP.frequency.value = 3200;
+  sizzleBP.Q.value = 0.9;
+
+  const sizzleEnv = ac.createGain();
+  sizzleEnv.gain.setValueAtTime(0, now + 0.02);
+  sizzleEnv.gain.linearRampToValueAtTime(0.07, now + 0.05);
+  sizzleEnv.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+
+  sizzle.connect(sizzleBP);
+  sizzleBP.connect(sizzleEnv);
+  sizzleEnv.connect(ac.destination);
+
+  // ----- Voice 3: low ominous undertone (something dangerous arrived) -----
+  // E2 sine with a slow decay — sub-bass color that gives the cue
+  // weight without making it sound like a hit.
+  const omenEnv = ac.createGain();
+  omenEnv.gain.setValueAtTime(0, now);
+  omenEnv.gain.linearRampToValueAtTime(0.08, now + 0.04);
+  omenEnv.gain.exponentialRampToValueAtTime(0.001, now + 0.30);
+
+  const omen = ac.createOscillator();
+  omen.type = 'sine';
+  omen.frequency.value = 82.41;  // E2
+  omen.connect(omenEnv);
+  omenEnv.connect(ac.destination);
+
+  tick.start(now);
+  tick.stop(now + tickDur);
+  sizzle.start(now + 0.02);
+  sizzle.stop(now + 0.02 + sizzleDur);
+  omen.start(now);
+  omen.stop(now + 0.32);
+}
+
+// "Static-charge crackle" cue played when a piece carrying a Lightning
+// special spawns. Sharp electrical character — a bandpassed noise
+// burst (the static) plus a fast rising sine sweep (a tesla coil
+// charging up) that resolves on a high C7. Shorter than the other
+// spawn cues (~180 ms) so it reads as instantaneous and bright.
+export function playLightningSpawnSound() {
+  const ac = getCtx();
+  const now = ac.currentTime;
+
+  // ----- Voice 1: static burst (the crackle) -----
+  const staticDur = 0.06;
+  const staticBuf = ac.createBuffer(1, Math.floor(ac.sampleRate * staticDur), ac.sampleRate);
+  const sdata = staticBuf.getChannelData(0);
+  for (let i = 0; i < sdata.length; i++) sdata[i] = Math.random() * 2 - 1;
+  const stat = ac.createBufferSource();
+  stat.buffer = staticBuf;
+
+  const staticBP = ac.createBiquadFilter();
+  staticBP.type = 'bandpass';
+  staticBP.frequency.value = 5500;
+  staticBP.Q.value = 1.4;
+
+  const staticEnv = ac.createGain();
+  staticEnv.gain.setValueAtTime(0.18, now);
+  staticEnv.gain.exponentialRampToValueAtTime(0.001, now + staticDur);
+
+  stat.connect(staticBP);
+  staticBP.connect(staticEnv);
+  staticEnv.connect(ac.destination);
+
+  // ----- Voice 2: rising charge sweep (tesla coil winding up) -----
+  // Triangle wave swept from C5 up to C7 — the rising motion sells
+  // the "energy building" feel. Triangle's hollow harmonic content
+  // reads more "electric coil" than a pure sine would.
+  const sweep = ac.createOscillator();
+  sweep.type = 'triangle';
+  sweep.frequency.setValueAtTime(523.25, now);                  // C5
+  sweep.frequency.exponentialRampToValueAtTime(2093.00, now + 0.12); // C7
+
+  const sweepLPF = ac.createBiquadFilter();
+  sweepLPF.type = 'lowpass';
+  sweepLPF.frequency.value = 4000;
+  sweepLPF.Q.value = 1.2;
+
+  const sweepEnv = ac.createGain();
+  sweepEnv.gain.setValueAtTime(0, now);
+  sweepEnv.gain.linearRampToValueAtTime(0.10, now + 0.02);
+  sweepEnv.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+
+  sweep.connect(sweepLPF);
+  sweepLPF.connect(sweepEnv);
+  sweepEnv.connect(ac.destination);
+
+  // ----- Voice 3: high resolution ping (charge held) -----
+  // Brief sine ping at C7 right as the sweep arrives — the "fully
+  // charged, ready to fire" punctuation.
+  const ping = ac.createOscillator();
+  ping.type = 'sine';
+  ping.frequency.value = 2093.00; // C7
+
+  const pingEnv = ac.createGain();
+  pingEnv.gain.setValueAtTime(0, now + 0.12);
+  pingEnv.gain.linearRampToValueAtTime(0.06, now + 0.13);
+  pingEnv.gain.exponentialRampToValueAtTime(0.001, now + 0.20);
+
+  ping.connect(pingEnv);
+  pingEnv.connect(ac.destination);
+
+  stat.start(now);
+  stat.stop(now + staticDur);
+  sweep.start(now);
+  sweep.stop(now + 0.18);
+  ping.start(now + 0.12);
+  ping.stop(now + 0.22);
+}
+
 // "Suction" cue played when the Gravity special block triggers. The
 // brief feels like the entire board is being inhaled toward a
 // singularity — three layers do the work:
@@ -877,6 +1095,168 @@ export function playGravitySuckSound() {
   noise.stop(now + 0.45);
   impact.start(now + 0.32);
   impact.stop(now + 0.50);
+}
+
+// "Boom" cue for the Bomb special. Concussive low-end thump plus a
+// short noise wash, with a fast filter sweep that opens then closes.
+// Three layers:
+//
+//   1. Sub-bass impact — quick A1 → A0 sine drop on its own envelope.
+//      That's what gives the cue its weight; a bomb without bottom
+//      end sounds like a popped balloon.
+//   2. Mid-range "thump" — square wave at 110 Hz with a fast pitch
+//      drop to 55 Hz. Square's harmonics give the boom a "punchy"
+//      edge over a pure sine, without going full noise.
+//   3. Noise burst — bandpassed at 2 kHz, fades over ~150 ms. The
+//      "debris" texture so the cue reads as breakage and not just a
+//      drum hit.
+//
+// Total ~280 ms — long enough to feel substantial, short enough that
+// a chained-bomb cluster doesn't bleed into one continuous rumble.
+export function playBombSound() {
+  const ac = getCtx();
+  const now = ac.currentTime;
+
+  // ----- Voice 1: sub-bass impact -----
+  const subEnv = ac.createGain();
+  subEnv.gain.setValueAtTime(0, now);
+  subEnv.gain.linearRampToValueAtTime(0.32, now + 0.005);
+  subEnv.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+
+  const sub = ac.createOscillator();
+  sub.type = 'sine';
+  sub.frequency.setValueAtTime(110, now);            // A2
+  sub.frequency.exponentialRampToValueAtTime(28, now + 0.20); // ≈ A0
+  sub.connect(subEnv);
+  subEnv.connect(ac.destination);
+
+  // ----- Voice 2: mid-range punch -----
+  const midEnv = ac.createGain();
+  midEnv.gain.setValueAtTime(0, now);
+  midEnv.gain.linearRampToValueAtTime(0.16, now + 0.008);
+  midEnv.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+
+  const midLPF = ac.createBiquadFilter();
+  midLPF.type = 'lowpass';
+  midLPF.frequency.value = 1200;
+  midLPF.Q.value = 0.7;
+
+  const mid = ac.createOscillator();
+  mid.type = 'square';
+  mid.frequency.setValueAtTime(220, now);
+  mid.frequency.exponentialRampToValueAtTime(55, now + 0.14);
+  mid.connect(midLPF);
+  midLPF.connect(midEnv);
+  midEnv.connect(ac.destination);
+
+  // ----- Voice 3: bandpassed noise debris -----
+  const noiseDur = 0.18;
+  const noiseBuf = ac.createBuffer(1, Math.floor(ac.sampleRate * noiseDur), ac.sampleRate);
+  const data = noiseBuf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const noise = ac.createBufferSource();
+  noise.buffer = noiseBuf;
+
+  const noiseBP = ac.createBiquadFilter();
+  noiseBP.type = 'bandpass';
+  noiseBP.frequency.value = 2000;
+  noiseBP.Q.value = 0.9;
+
+  const noiseEnv = ac.createGain();
+  noiseEnv.gain.setValueAtTime(0.20, now);
+  noiseEnv.gain.exponentialRampToValueAtTime(0.001, now + noiseDur);
+
+  noise.connect(noiseBP);
+  noiseBP.connect(noiseEnv);
+  noiseEnv.connect(ac.destination);
+
+  sub.start(now);
+  sub.stop(now + 0.32);
+  mid.start(now);
+  mid.stop(now + 0.20);
+  noise.start(now);
+  noise.stop(now + noiseDur);
+}
+
+// "Crack" cue for the Lightning special. Sharp, bright, fast — the
+// audio analog of an electric arc striking the column. Layers:
+//
+//   1. Front-loaded noise burst (~30 ms) bandpassed high (6 kHz) —
+//      the "snap" of the strike. Pure transient, no decay envelope
+//      shape beyond an instant exponential drop.
+//   2. A descending sawtooth zap (1800 → 200 Hz over 80 ms) — the
+//      "zzzzap" body. Sawtooth's bright harmonics carry the
+//      electrical character that a sine couldn't.
+//   3. A high sine ring (E7 ~2637 Hz) on a 250 ms tail — the
+//      after-tone that makes the cue feel "magical electric" instead
+//      of "industrial buzz."
+//
+// Shorter overall than the bomb (~260 ms) so chained-Lightning
+// triggers down a column don't blur into white noise.
+export function playLightningSound() {
+  const ac = getCtx();
+  const now = ac.currentTime;
+
+  // ----- Voice 1: front-loaded noise crack -----
+  const crackDur = 0.04;
+  const crackBuf = ac.createBuffer(1, Math.floor(ac.sampleRate * crackDur), ac.sampleRate);
+  const cdata = crackBuf.getChannelData(0);
+  for (let i = 0; i < cdata.length; i++) cdata[i] = Math.random() * 2 - 1;
+  const crack = ac.createBufferSource();
+  crack.buffer = crackBuf;
+
+  const crackBP = ac.createBiquadFilter();
+  crackBP.type = 'bandpass';
+  crackBP.frequency.value = 6000;
+  crackBP.Q.value = 1.6;
+
+  const crackEnv = ac.createGain();
+  crackEnv.gain.setValueAtTime(0.22, now);
+  crackEnv.gain.exponentialRampToValueAtTime(0.001, now + crackDur);
+
+  crack.connect(crackBP);
+  crackBP.connect(crackEnv);
+  crackEnv.connect(ac.destination);
+
+  // ----- Voice 2: descending sawtooth zap -----
+  const zap = ac.createOscillator();
+  zap.type = 'sawtooth';
+  zap.frequency.setValueAtTime(1800, now);
+  zap.frequency.exponentialRampToValueAtTime(200, now + 0.08);
+
+  const zapLPF = ac.createBiquadFilter();
+  zapLPF.type = 'lowpass';
+  zapLPF.frequency.value = 3200;
+  zapLPF.Q.value = 0.8;
+
+  const zapEnv = ac.createGain();
+  zapEnv.gain.setValueAtTime(0, now);
+  zapEnv.gain.linearRampToValueAtTime(0.15, now + 0.005);
+  zapEnv.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+
+  zap.connect(zapLPF);
+  zapLPF.connect(zapEnv);
+  zapEnv.connect(ac.destination);
+
+  // ----- Voice 3: high sine ring -----
+  const ring = ac.createOscillator();
+  ring.type = 'sine';
+  ring.frequency.value = 2637.02; // E7
+
+  const ringEnv = ac.createGain();
+  ringEnv.gain.setValueAtTime(0, now + 0.04);
+  ringEnv.gain.linearRampToValueAtTime(0.07, now + 0.05);
+  ringEnv.gain.exponentialRampToValueAtTime(0.001, now + 0.26);
+
+  ring.connect(ringEnv);
+  ringEnv.connect(ac.destination);
+
+  crack.start(now);
+  crack.stop(now + crackDur);
+  zap.start(now);
+  zap.stop(now + 0.13);
+  ring.start(now + 0.04);
+  ring.stop(now + 0.28);
 }
 
 // Soft low "thump" played when a fill power-up materializes a block.

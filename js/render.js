@@ -708,7 +708,14 @@ function drawFillCursor(ctx, cursor, onEmpty) {
 }
 
 // Render a single piece centered inside a small canvas (hold / next preview).
-export function drawMini(canvas, ctx, type) {
+//
+// `specials` is optional — a list of `{ rot0Row, rot0Col, kind }` in
+// the rot-0 frame, matching the shape PIECES[type][0] this preview
+// always renders. When supplied, tagged minos paint with the cycling
+// special palette instead of the piece's flat color, so a held
+// special-bearing piece reads in the preview the same way it reads
+// on the board.
+export function drawMini(canvas, ctx, type, specials = null) {
   ctx.fillStyle = COLORS.BG;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   if (!type) return;
@@ -732,11 +739,27 @@ export function drawMini(canvas, ctx, type) {
   const offX = (canvas.width  - w * cell) / 2;
   const offY = (canvas.height - h * cell) / 2;
 
+  // Single time source for any special-cycling cells in this preview.
+  const tNow = specials && specials.length > 0
+    ? (typeof performance !== 'undefined' ? performance.now() : Date.now())
+    : 0;
+
   for (let r = minR; r <= maxR; r++) {
     for (let cc = minC; cc <= maxC; cc++) {
       if (!shape[r][cc]) continue;
       const x = offX + (cc - minC) * cell;
       const y = offY + (r  - minR) * cell;
+      // Specials are stored in rot-0 frame; the preview always paints
+      // rot 0, so the rot0Row/rot0Col coords match the iteration
+      // indices directly — no transformLocalCoord needed here.
+      const tag = specials && specials.find(s => s.rot0Row === r && s.rot0Col === cc)?.kind;
+      if (tag) {
+        const def = SPECIALS_BY_ID[tag];
+        if (def) {
+          drawSpecialBlock(ctx, x, y, cell, def, tNow);
+          continue;
+        }
+      }
       drawBlock(ctx, x, y, cell, COLORS[type]);
     }
   }

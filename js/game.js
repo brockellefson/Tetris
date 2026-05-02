@@ -167,6 +167,13 @@ export class Game {
     this.boardSpecials = newBoard();
     this.queue       = [];
     this.hold        = null;
+    // Mirrors the active piece's `specials` array for the held slot.
+    // `this.hold` stays a type letter so existing readers (HUD,
+    // drawMini, Whoops snapshot) keep working unchanged; this
+    // parallel slot preserves the special tag so a held special
+    // doesn't evaporate on swap. Reattached to the spawned piece in
+    // holdPiece's swap branch. Initialized to null on every reset.
+    this.holdSpecials = null;
     this.canHold     = true;
     this.current     = null;
     this.score       = 0;
@@ -516,8 +523,24 @@ export class Game {
     if (!this.current || !this.canHold) return;
     if (!this.unlocks.hold) return; // gated behind a power-up
     const t = this.current.type;
+    // Capture specials BEFORE we overwrite this.current. The held
+    // piece preserves its tagged mino through the swap so a special
+    // doesn't evaporate when the player parks the piece. Cloned so
+    // later mutations on the original array can't alias the held
+    // copy.
+    const specials = this.current.specials
+      ? this.current.specials.map(s => ({ ...s }))
+      : null;
     if (this.hold) {
+      // Swap branch: spawn the previously-held type and reattach the
+      // specials we stored alongside it on its way into hold. The
+      // restored piece doesn't fire onSpecialSpawn — the spawn cue is
+      // for first-arrival only; a swap is the player choosing to bring
+      // a special back, not a fresh roll.
       this.current = spawn(this.hold);
+      if (this.holdSpecials) {
+        this.current.specials = this.holdSpecials.map(s => ({ ...s }));
+      }
       if (collides(this.board, this.current)) this.gameOver = true;
     } else {
       // First-hold branch: stash the held piece and pull the next from
@@ -532,6 +555,7 @@ export class Game {
       this._notifyPlugins('afterHoldSwap');
     }
     this.hold = t;
+    this.holdSpecials = specials;
     this.canHold = false;
   }
 

@@ -58,14 +58,21 @@ import {
   SPECIAL_BLOCK_PER_LEVEL_BONUS,
   SPECIAL_BLOCK_MAX_CHANCE,
   SPECIAL_RARITY_WEIGHTS,
+  SPECIAL_DESTROY_POINTS,
 } from '../constants.js';
 import { PIECES, transformLocalCoord } from '../pieces.js';
-import gravitySpecial from './gravity.js';
+import gravitySpecial   from './gravity.js';
+import bombSpecial      from './bomb.js';
+import lightningSpecial from './lightning.js';
 
 // Single source of truth for which specials exist. Order doesn't
-// matter — the picker re-shuffles by weight every roll.
+// matter — the picker re-shuffles by weight every roll. Adding a
+// new special is one new file plus one entry in this array; the
+// debug menu's "Force <name>" pills auto-build from it.
 export const ALL_SPECIALS = [
   gravitySpecial,
+  bombSpecial,
+  lightningSpecial,
 ];
 
 // Index by id for O(1) lookup from the trigger pipeline (board cells
@@ -181,15 +188,43 @@ function removeRowsSpecials(specials, rows) {
 
 // ---- Trigger dispatch ----------------------------------------
 
-// Single chokepoint for "this cell just got removed by some non-clear
-// path" — fires the cell's special, if any, then nulls it out. Used
-// by onCellRemoved (chisel today; future paths could call directly).
+// ---- Trigger dispatch + destruction scoring --------------------
 //
-// game.onSpecialTrigger fires BEFORE the trigger so the audio cue
-// lands at the moment the cell breaks, not after the trigger's own
-// effects (cascade ticks, future bombs) have started competing for
-// the audio channel. main.js routes the callback to a per-kind
-// sound function with a generic shimmer fallback.
+// Two intertwined concerns share state here:
+//
+//   1. Trigger dispatch — single chokepoint for "this cell just got
+//      removed by some non-clear path." Fires the cell's special if
+//      any.
+//
+//   2. Destruction scoring — every cell removed via onCellRemoved
+//      earns SPECIAL_DESTROY_POINTS × level. Bomb blast cells,
+//      Lightning column cells, plain Chisel hits, and chained
+//      specials all flow through this single hook, so one constant
+//      tunes them all.
+//
+// Notification batching uses a depth counter: each call into
+// runSpecialTrigger increments depth; the destruction-cell counter
+// resets on the OUTERMOST entry (depth 0 → 1) and the notification
+// fires on the matching exit (depth 1 → 0). Chained triggers
+// (Bomb-into-Bomb, Lightning-into-Gravity) share the outer trigger's
+// notification batch — one big "+N" instead of confetti.
+let _triggerDepth = 0;
+let _triggerDestroyCount = 0;
+
+function runSpecialTrigger(game, def, x, y, source) {
+  if (_triggerDepth === 0) _triggerDestroyCount = 0;
+  _triggerDepth++;
+  // Audio cue first so it lands at the moment of break, before any
+  // chained specials/cascades start competing for the channel.
+  game.onSpecialTrigger?.(def.id, source);
+  def.onTrigger?.(game, x, y, source);
+  _triggerDepth--;
+  if (_triggerDepth === 0 && _triggerDestroyCount > 0) {
+    const points = _triggerDestroyCount * SPECIAL_DESTROY_POINTS * game.level;
+    game.onSpecialDestroy?.(def.id, _triggerDestroyCount, points);
+  }
+}
+
 function fireSpecialAt(game, x, y, source) {
   if (!game.boardSpecials) return;
   const kind = game.boardSpecials[y]?.[x];
@@ -197,8 +232,7 @@ function fireSpecialAt(game, x, y, source) {
   game.boardSpecials[y][x] = null;
   const def = SPECIALS_BY_ID[kind];
   if (!def) return;
-  game.onSpecialTrigger?.(kind, source);
-  def.onTrigger?.(game, x, y, source);
+  runSpecialTrigger(game, def, x, y, source);
 }
 
 // ---- The plugin ----------------------------------------------
@@ -216,6 +250,13 @@ export default {
     game.boardSpecials = newBoardSpecials(cols, rows);
     game._pendingSpecialTriggers = null;
     game._forceNextSpecial = null;
+    // Reset module-level trigger-batch counters. If a restart happens
+    // mid-trigger (extremely unlikely — the only path is the player
+    // hitting R during a chisel-into-bomb chain) we'd otherwise carry
+    // stale depth into the new run and either suppress a notification
+    // or fire one early.
+    _triggerDepth = 0;
+    _triggerDestroyCount = 0;
   },
 
   // ---- Spawn — possibly attach a special ----
@@ -285,24 +326,33 @@ export default {
     for (const t of list) {
       const def = SPECIALS_BY_ID[t.kind];
       if (!def) continue;
-      // Fire the audio cue first so the trigger's own effects (cascade
-      // ticks, etc.) don't mask the moment-of-break sound. Same
-      // ordering as fireSpecialAt above.
-      game.onSpecialTrigger?.(t.kind, 'lineClear');
-      def.onTrigger?.(game, t.x, t.y, 'lineClear');
+      // Each captured trigger is its own top-level event — the depth
+      // counter resets the destroy-tally for each one, so a clear
+      // that detonates two Bombs floats two separate "+N" notifications.
+      runSpecialTrigger(game, def, t.x, t.y, 'lineClear');
     }
   },
 
-  // ---- Chisel (and any future single-cell remover) ----
+  // ---- Cell removal (chisel + special blasts + chained removers) ----
   //
-  // Fired from chisel.selectCell after it nulls the board cell. The
-  // cell's special — if any — gets cleared and its onTrigger fires.
-  // Triggers run synchronously; a Gravity-special chisel will start
-  // the cascade *while* the chisel-shatter animation is still
-  // playing, which reads as "one boom causes another boom" — the
-  // intended drama.
+  // Three things happen for every cell removed via this hook:
+  //
+  //   1. Destruction score — SPECIAL_DESTROY_POINTS × level points
+  //      are awarded. Plain chisel hits, bomb blasts, lightning
+  //      column cells, and chained specials all earn the same flat
+  //      bonus per cell.
+  //   2. Notification batching — if we're inside a special trigger,
+  //      bump the destroy counter so the outer trigger's "+N"
+  //      notification reflects the total (including chained damage).
+  //   3. Trigger fan-out — if the removed cell carried a special,
+  //      that special's onTrigger fires next. The depth counter in
+  //      runSpecialTrigger handles re-entry.
 
   onCellRemoved(game, x, y, source) {
+    if (SPECIAL_DESTROY_POINTS > 0) {
+      game.score += SPECIAL_DESTROY_POINTS * game.level;
+      if (_triggerDepth > 0) _triggerDestroyCount += 1;
+    }
     fireSpecialAt(game, x, y, source);
   },
 };
