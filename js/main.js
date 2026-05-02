@@ -191,15 +191,32 @@ function showPowerUpMenu() {
   // (powerup, curse) pairing every time the menu opens.
   const curses = pickCurseChoices(game, powerups.length);
 
-  // Forbid Tired + Hyped on the same card — they cancel out, so the
-  // pick would be a free no-op trade. If we land on that pairing, swap
-  // the Hyped curse into another slot. Tired is unique in the powerup
-  // pool, so any other index is guaranteed conflict-free.
-  const tiredIdx = powerups.findIndex(p => p.id === 'tired');
-  if (tiredIdx !== -1 && curses[tiredIdx]?.id === 'curse-hyped') {
-    const swapIdx = curses.findIndex((c, i) => i !== tiredIdx && c?.id !== 'curse-hyped');
+  // Forbid pairings where the bundled curse exactly cancels its
+  // power-up on the same card — picking it would be a free no-op
+  // trade (you'd eat the debuff for a buff that the debuff just
+  // undid).
+  //
+  //   Tired + Hyped — Tired clamps gravity to level 1 speed, Hyped
+  //                   bumps the gravity table offset; cancel out.
+  //   Mercy + Cruel — Mercy unshifts an I-piece onto the queue,
+  //                   Cruel's apply() then filters all I-pieces out
+  //                   of the queue; the Mercy effect is wiped before
+  //                   the player ever sees it.
+  //
+  // For each conflict, swap the offending curse into another slot.
+  // Each listed power-up is unique in the pool (one entry in
+  // ALL_POWERUPS), so swapping the curse can't accidentally land it
+  // on a second copy of the same conflicting power-up.
+  const CANCELING_PAIRS = [
+    { powerup: 'tired', curse: 'curse-hyped' },
+    { powerup: 'mercy', curse: 'curse-cruel' },
+  ];
+  for (const { powerup: pId, curse: cId } of CANCELING_PAIRS) {
+    const pIdx = powerups.findIndex(p => p.id === pId);
+    if (pIdx === -1 || curses[pIdx]?.id !== cId) continue;
+    const swapIdx = curses.findIndex((c, i) => i !== pIdx && c?.id !== cId);
     if (swapIdx !== -1) {
-      [curses[tiredIdx], curses[swapIdx]] = [curses[swapIdx], curses[tiredIdx]];
+      [curses[pIdx], curses[swapIdx]] = [curses[swapIdx], curses[pIdx]];
     }
   }
 
@@ -232,6 +249,10 @@ function showNextChoice() {
   // the modal would steal the click/keyboard focus the power-up needs.
   if (game.chisel.active || game.chisel.target) return;
   if (game.fill.active || game.fill.target) return;
+  // Don't pop a modal while the Gravity cascade is still running —
+  // any picks earned mid-cascade (e.g. milestones from gravity-
+  // induced line clears) queue up behind onGravityComplete.
+  if (game.gravity.active) return;
   // Don't open a second menu if one is already up.
   if (!powerupMenu$.classList.contains('hidden')) return;
 
@@ -391,6 +412,11 @@ game.onChiselComplete = ()  => showNextChoice();
 // the end of the materialize animation (no line cleared) OR after a
 // fill-triggered line-clear animation completes.
 game.onFillComplete = ()  => showNextChoice();
+// Gravity blessing — fires once the cascade fully settles (no more
+// blocks fall, no more lines clear). Same menu-deferral flow as
+// chisel/fill so any picks earned via gravity-triggered line clears
+// surface in order behind the animation.
+game.onGravityComplete = ()  => showNextChoice();
 // Junk-curse FX: small notification so the row drop doesn't feel silent.
 game.onJunk           = (n) => notify(n > 1 ? `JUNK +${n}` : 'JUNK', 'b2b', 1400);
 game.onRain           = (n) => notify(n > 1 ? `RAIN +${n}` : 'RAIN', 'b2b', 1300);

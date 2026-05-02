@@ -17,6 +17,7 @@ import {
   SHAKE_DURATION, SHAKE_LOCK, SHAKE_HARDDROP,
   B2B_MULTIPLIER, COMBO_BONUS, PERFECT_CLEAR_BONUS,
   LOCK_DELAY,
+  GRAVITY_POWER_STEP,
   MAX_CHISEL_CHARGES, MAX_FILL_CHARGES, MAX_FLIP_CHARGES,
   MAX_WHOOPS_CHARGES,
 } from './constants.js';
@@ -179,6 +180,21 @@ export class Game {
     //                 it here and have completeClear() restore it
     //                 instead of spawning a fresh one.
     this.fill = { active: false, target: null, cursor: null, savedPiece: null };
+    // Gravity power-up state — a one-shot board-compaction sequence.
+    //   active     — true while the cascade is running. Freezes player
+    //                input and the normal gravity drop in tick().
+    //   savedPiece — the active piece is hidden from the board for the
+    //                duration of the cascade (so falling locked blocks
+    //                don't visually pass through it). Restored to
+    //                `current` when the sequence ends.
+    //   phase      — 'fall' while we're stepping blocks downward,
+    //                'clearing' while a line-clear animation triggered
+    //                by the cascade plays. After a clear we loop back
+    //                to 'fall' to see if the now-shifted board can
+    //                drop further.
+    //   stepTimer  — accumulates dt; each time it crosses
+    //                GRAVITY_POWER_STEP we run one fall step.
+    this.gravity = { active: false, savedPiece: null, phase: 'fall', stepTimer: 0 };
     this.refillQueue();
   }
 
@@ -196,6 +212,7 @@ export class Game {
     if (this.isClearing()) return false;
     if (this.chisel.active || this.chisel.target) return false;
     if (this.fill.active || this.fill.target) return false;
+    if (this.gravity.active) return false;
     if (this.unlocks.chiselCharges <= 0) return false;
     // No locked block on the board → activating would just hang the
     // game waiting on a confirm that can't succeed. Refuse.
@@ -219,6 +236,7 @@ export class Game {
     if (this.isClearing()) return false;
     if (this.chisel.active || this.chisel.target) return false;
     if (this.fill.active || this.fill.target) return false;
+    if (this.gravity.active) return false;
     if (this.unlocks.flipCharges <= 0) return false;
     if (!this.current) return false;
     const flipped = tryFlip(this.board, this.current);
@@ -258,6 +276,7 @@ export class Game {
     if (this.pendingChoices > 0) return false;
     if (this.chisel.active || this.chisel.target) return false;
     if (this.fill.active || this.fill.target) return false;
+    if (this.gravity.active) return false;
     const s = this.whoopsSnapshot;
     // Restore world state. Board and queue are deep-copied on
     // capture, so assigning the snapshot's references directly
@@ -298,6 +317,139 @@ export class Game {
     return true;
   }
 
+  // -------- Gravity power-up --------
+  //
+  // One-shot blessing. Picking the card calls startGravity(); the
+  // active piece is parked, all locked blocks fall to fill empty
+  // space below them one row at a time (animated step-by-step in
+  // tick()), full rows are cleared with the standard line-clear
+  // animation/score, and the fall-then-clear loop repeats until the
+  // board is stable. Then the active piece is restored and play
+  // resumes.
+
+  // Begin the gravity cascade. Idempotent — refuses to re-enter
+  // if a sequence is already running. The active piece is moved
+  // into `gravity.savedPiece` and `current` is cleared so the
+  // renderer hides it for the duration (otherwise falling locked
+  // blocks would visually pass through the piece's silhouette).
+  startGravity() {
+    if (this.gravity.active) return;
+    this.gravity.active     = true;
+    this.gravity.savedPiece = this.current;
+    this.current            = null;
+    this.gravity.phase      = 'fall';
+    this.gravity.stepTimer  = 0;
+    // Cancel any in-flight Slick lock-delay window — there's no
+    // active piece for it to apply to during the cascade.
+    this.lockDelayTimer     = 0;
+    this.dropTimer          = 0;
+  }
+
+  // Perform one fall step over the locked-block grid. Every cell
+  // that has a block above an empty space gets shifted down by one
+  // row. Returns true if at least one block moved (caller uses this
+  // to decide whether the cascade has settled).
+  //
+  // Iteration is bottom-up (rows-2 → 0) so a stack of N floating
+  // blocks above a single gap doesn't collapse all N rows in one
+  // step — only the bottommost floating block falls per call. That
+  // gives the cascade its visible "rain" cadence; without it the
+  // board would resolve in a single frame.
+  gravityStep() {
+    const rows = this.board.length;
+    const cols = this.board[0]?.length ?? 10;
+    let moved = false;
+    for (let r = rows - 2; r >= 0; r--) {
+      for (let c = 0; c < cols; c++) {
+        if (this.board[r][c] && !this.board[r + 1][c]) {
+          this.board[r + 1][c] = this.board[r][c];
+          this.board[r][c]     = null;
+          moved = true;
+        }
+      }
+    }
+    return moved;
+  }
+
+  // Complete a gravity-induced line clear. Mirrors completeClear()'s
+  // scoring path (line score, B2B, combo, perfect-clear, lines/level,
+  // milestone power-up choices) but does NOT spawn a new piece — the
+  // saved piece is restored at the end of the whole cascade by
+  // endGravity(), not after every clear. After scoring, we loop back
+  // into the 'fall' phase to see if the cleared rows expose more
+  // floating blocks that can now drop.
+  gravityCompleteClear() {
+    const cleared = this.clearingRows.length;
+    removeRows(this.board, this.clearingRows);
+
+    const wasB2B = (cleared === 4 && this.lastClearWasTetris);
+
+    let lineScore = LINE_SCORES[cleared] * this.level;
+    if (wasB2B) lineScore = Math.floor(lineScore * B2B_MULTIPLIER);
+    this.score += lineScore;
+
+    this.combo += cleared;
+    this.score += COMBO_BONUS * this.combo * this.level;
+
+    this.lastClearWasTetris = (cleared === 4);
+
+    const perfect = this.board.every(row => row.every(cell => cell === null));
+    if (perfect) this.score += PERFECT_CLEAR_BONUS;
+
+    const linesBefore = this.lines;
+    this.lines += cleared;
+    this.level = Math.floor(this.lines / 10) + 1;
+
+    // Roguelite power-up milestones — same rule as completeClear().
+    // The choice menu won't surface until endGravity() fires the
+    // onGravityComplete hook, so any picks earned mid-cascade queue
+    // up cleanly behind the animation.
+    let milestonesEarned =
+      Math.floor(this.lines / 5) - Math.floor(linesBefore / 5);
+    if (!this.firstClearAwarded && cleared > 0) {
+      this.firstClearAwarded = true;
+      milestonesEarned += 1;
+    }
+    if (milestonesEarned > 0) {
+      this.pendingChoices += milestonesEarned;
+      this.onPowerUpChoice?.(this.pendingChoices);
+    }
+
+    if (perfect)         this.onPerfectClear?.();
+    if (cleared === 4)   this.onTetris?.(wasB2B);
+    if (this.combo >= 2) this.onCombo?.(this.combo);
+
+    this.clearingRows = [];
+    this.clearTimer = 0;
+    // Cleared rows may have exposed more floating blocks above —
+    // continue the cascade.
+    this.gravity.phase     = 'fall';
+    this.gravity.stepTimer = 0;
+  }
+
+  // Wrap up the gravity cascade and hand control back to the player.
+  // Restores the saved piece into `current`. If the (extremely
+  // unlikely) restoration overlaps a block — e.g. a clever Fill /
+  // Junk-row interaction shifted blocks under the parked piece —
+  // we end the run, mirroring the standard spawn-collision rule.
+  endGravity() {
+    this.gravity.active = false;
+    if (this.gravity.savedPiece) {
+      this.current = this.gravity.savedPiece;
+      this.gravity.savedPiece = null;
+      if (collides(this.board, this.current)) {
+        this.gameOver = true;
+      }
+    }
+    this.gravity.phase     = 'fall';
+    this.gravity.stepTimer = 0;
+    // Reset gravity-drop accumulator so the restored piece doesn't
+    // immediately fall a row from leftover dt collected pre-cascade.
+    this.dropTimer = 0;
+    // Lets main.js re-open any choice menu deferred by gravity.active.
+    this.onGravityComplete?.();
+  }
+
   // Mirror of tryActivateChisel for fill. Same gating rules; the
   // empty-cell check is the inverse — refuse if the board is fully
   // packed (which would also imply game over, but we guard anyway).
@@ -308,6 +460,7 @@ export class Game {
     if (this.isClearing()) return false;
     if (this.chisel.active || this.chisel.target) return false;
     if (this.fill.active || this.fill.target) return false;
+    if (this.gravity.active) return false;
     if (this.unlocks.fillCharges <= 0) return false;
     const hasEmpty = this.board.some(row => row.some(cell => cell === null));
     if (!hasEmpty) return false;
@@ -901,6 +1054,59 @@ export class Game {
 
   tick(dt) {
     if (!this.started || this.paused || this.gameOver) return;
+
+    // Gravity power-up cascade. Owns its own line-clear sub-state
+    // ('fall' vs 'clearing') so a gravity-triggered clear can flow
+    // straight back into another fall step instead of spawning a
+    // new piece the way the standard line-clear path does.
+    //
+    // Checked BEFORE the pendingChoices guard because a clear
+    // triggered mid-cascade can earn a milestone (bumping
+    // pendingChoices > 0), and we must keep stepping the cascade
+    // through that interval — the menu itself is deferred by
+    // main.js's gravity.active gate, so it'll open cleanly once
+    // endGravity() fires.
+    if (this.gravity.active) {
+      // Let the board shake decay alongside the cascade so a recent
+      // hard-drop tremor doesn't freeze mid-shake for the duration.
+      if (this.shakeIntensity > 0) {
+        this.shakeTimer += dt;
+        if (this.shakeTimer >= SHAKE_DURATION) {
+          this.shakeIntensity = 0;
+          this.shakeTimer = 0;
+        }
+      }
+      if (this.gravity.phase === 'clearing') {
+        this.clearTimer += dt;
+        if (this.clearTimer >= CLEAR_DURATION) this.gravityCompleteClear();
+        return;
+      }
+      // 'fall' phase — accumulate dt and run a step each time the
+      // step interval elapses. A single dt slice can span multiple
+      // steps (low frame rate), so loop until we're back under it.
+      this.gravity.stepTimer += dt;
+      while (this.gravity.stepTimer >= GRAVITY_POWER_STEP) {
+        this.gravity.stepTimer -= GRAVITY_POWER_STEP;
+        const moved = this.gravityStep();
+        if (!moved) {
+          // Cascade settled. Any full rows? If so kick off the
+          // standard clear animation; gravityCompleteClear() will
+          // resume the fall loop after the animation finishes.
+          const fullRows = findFullRows(this.board);
+          if (fullRows.length > 0) {
+            this.clearingRows  = fullRows;
+            this.clearTimer    = 0;
+            this.gravity.phase = 'clearing';
+            this.onLineClear?.(fullRows.length);
+          } else {
+            this.endGravity();
+          }
+          break;
+        }
+      }
+      return;
+    }
+
     // Freeze gameplay while the power-up choice menu is open.
     if (this.pendingChoices > 0) return;
 

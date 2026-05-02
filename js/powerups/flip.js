@@ -12,8 +12,8 @@
 //                         shape fits at the current position.
 //
 // Unlike Chisel/Fill, there's no cell-pick step — the flip is
-// instant. A second F press flips back (also costs a charge), so
-// a 2-charge stack lets you preview and revert.
+// instant. The cap is one charge, so the pick is a deliberate
+// "spend it on the right piece" decision rather than a stockpile.
 //
 // Mirroring caveats:
 //   • I, O are symmetric — flipping is visually a no-op but still
@@ -32,7 +32,7 @@ import { MAX_FLIP_CHARGES } from '../constants.js';
 export default {
   id: 'flip',
   name: 'Flip',
-  description: 'Press F to mirror the active piece. Stacks up to 3.',
+  description: 'Press F to mirror the active piece. One charge.',
   available: (game) => game.unlocks.flipCharges < MAX_FLIP_CHARGES,
   apply: (game) => {
     game.unlocks.flipCharges = Math.min(

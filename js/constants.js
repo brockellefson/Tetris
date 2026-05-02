@@ -84,18 +84,20 @@ export const SHAKE_DURATION = 220;
 export const SHAKE_LOCK     = 2;
 export const SHAKE_HARDDROP = 4;
 
-// Chisel and Fill are now banked consumables. Picking the power-up
+// Chisel and Fill are banked consumables. Picking the power-up
 // card grants a charge; the player spends a charge by pressing A
-// (chisel) or S (fill). Each tops out at 3 charges — once the
-// player is at max, the corresponding card no longer surfaces in
-// the choice menu (see `available` on those power-ups).
-export const MAX_CHISEL_CHARGES = 3;
-export const MAX_FILL_CHARGES = 3;
+// (chisel) or S (fill). Each tops out at 1 charge — once the
+// player has banked one, the corresponding card no longer surfaces
+// in the choice menu (see `available` on those power-ups), so the
+// pick is a deliberate "save it for the moment that needs it"
+// decision rather than a stacked stockpile.
+export const MAX_CHISEL_CHARGES = 1;
+export const MAX_FILL_CHARGES = 1;
 
 // Flip — banked consumable that horizontally mirrors the active
-// piece. Pressing F spends one charge. Same 3-charge cap as
+// piece. Pressing F spends one charge. Same single-charge cap as
 // Chisel and Fill.
-export const MAX_FLIP_CHARGES = 3;
+export const MAX_FLIP_CHARGES = 1;
 
 // Whoops — banked consumable that rewinds the world to just before
 // the active piece spawned. Pressing W spends the charge. Capped at
@@ -109,3 +111,11 @@ export const MAX_WHOOPS_CHARGES = 1;
 // resets on every successful move/rotate (step reset), so chained inputs
 // can extend the window indefinitely. Hard drops bypass this entirely.
 export const LOCK_DELAY = 500;
+
+// Gravity power-up — milliseconds between each "fall step" while the
+// gravity blessing is processing. Each step shifts every floating
+// locked block down by one cell, so smaller values look snappier and
+// larger values let the player follow the cascade. Tuned for a slow,
+// dramatic "rain" cadence — the player should feel each block thud
+// down rather than see the board snap into place.
+export const GRAVITY_POWER_STEP = 120;
