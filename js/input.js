@@ -48,7 +48,7 @@ export function setupInput(game, callbacks = {}) {
         callbacks.onStart?.();
       } else if (e.key === 'w' || e.key === 'W') {
         e.preventDefault();
-        game.tryActivateWhoops();
+        game._interceptInput('whoops');
       }
       return;
     }
@@ -66,6 +66,10 @@ export function setupInput(game, callbacks = {}) {
     // animation plays), gameplay keys are inert. Arrow keys / WASD
     // drive a keyboard cursor so the player can pick a block without
     // a mouse, with Enter/Space confirming the highlighted cell.
+    //
+    // The cursor & confirm actions are dispatched generically as
+    // 'cursor:*' so the same wiring serves Fill (and any future
+    // cell-picker) — only the active plugin claims the action.
     //
     // IMPORTANT: this branch runs *before* the pendingChoices/Curses
     // early-return below. Chisel freezes the menu queue (showNextChoice
@@ -86,27 +90,27 @@ export function setupInput(game, callbacks = {}) {
           case 'ArrowLeft':
           case 'a': case 'A':
             e.preventDefault();
-            game.chiselMoveCursor(-1, 0);
+            game._interceptInput('cursor:left');
             return;
           case 'ArrowRight':
           case 'd': case 'D':
             e.preventDefault();
-            game.chiselMoveCursor(1, 0);
+            game._interceptInput('cursor:right');
             return;
           case 'ArrowUp':
           case 'w': case 'W':
             e.preventDefault();
-            game.chiselMoveCursor(0, -1);
+            game._interceptInput('cursor:up');
             return;
           case 'ArrowDown':
           case 's': case 'S':
             e.preventDefault();
-            game.chiselMoveCursor(0, 1);
+            game._interceptInput('cursor:down');
             return;
           case 'Enter':
           case ' ':
             e.preventDefault();
-            game.chiselConfirm();
+            game._interceptInput('cursor:confirm');
             return;
         }
       }
@@ -115,7 +119,8 @@ export function setupInput(game, callbacks = {}) {
 
     // Fill power-up: same UX surface as chisel. Gameplay keys are
     // inert while fill.active or fill.target is set, and the
-    // arrow / WASD cursor is driven through game.fillMoveCursor.
+    // arrow / WASD cursor dispatches the same generic 'cursor:*'
+    // actions chisel uses — only the active plugin claims them.
     if (game.fill.active || game.fill.target) {
       if (e.key === 'r' || e.key === 'R') {
         e.preventDefault();
@@ -128,27 +133,27 @@ export function setupInput(game, callbacks = {}) {
           case 'ArrowLeft':
           case 'a': case 'A':
             e.preventDefault();
-            game.fillMoveCursor(-1, 0);
+            game._interceptInput('cursor:left');
             return;
           case 'ArrowRight':
           case 'd': case 'D':
             e.preventDefault();
-            game.fillMoveCursor(1, 0);
+            game._interceptInput('cursor:right');
             return;
           case 'ArrowUp':
           case 'w': case 'W':
             e.preventDefault();
-            game.fillMoveCursor(0, -1);
+            game._interceptInput('cursor:up');
             return;
           case 'ArrowDown':
           case 's': case 'S':
             e.preventDefault();
-            game.fillMoveCursor(0, 1);
+            game._interceptInput('cursor:down');
             return;
           case 'Enter':
           case ' ':
             e.preventDefault();
-            game.fillConfirm();
+            game._interceptInput('cursor:confirm');
             return;
         }
       }
@@ -193,34 +198,37 @@ export function setupInput(game, callbacks = {}) {
         game.holdPiece();
         break;
       case 'a': case 'A':
-        // Spend a banked Chisel charge. tryActivateChisel() refuses
-        // when the player has no charges, when gameplay is otherwise
-        // frozen, or when the board has nothing to chisel — so this
-        // keypress is safe to fire unconditionally.
+        // Spend a banked Chisel charge. The plugin's interceptInput
+        // refuses when the player has no charges, when gameplay is
+        // otherwise frozen, or when the board has nothing to chisel,
+        // so this keypress is safe to fire unconditionally.
         e.preventDefault();
-        game.tryActivateChisel();
+        game._interceptInput('chisel:activate');
         break;
       case 's': case 'S':
-        // Spend a banked Fill charge. Same gating as Chisel.
+        // Spend a banked Fill charge. Same gating as Chisel —
+        // dispatched via the plugin's interceptInput.
         e.preventDefault();
-        game.tryActivateFill();
+        game._interceptInput('fill:activate');
         break;
       case 'f': case 'F':
         // Spend a banked Flip charge — horizontally mirrors the
-        // active piece. tryActivateFlip() refuses (no charge spent)
-        // if there's no current piece or the mirrored shape would
-        // collide at the current position.
+        // active piece. The plugin's interceptInput refuses (no
+        // charge spent) if there's no current piece or the mirrored
+        // shape would collide at the current position.
         e.preventDefault();
-        game.tryActivateFlip();
+        game._interceptInput('flip:activate');
         break;
       case 'w': case 'W':
         // Spend the banked Whoops charge — rewinds to before the
-        // most recently locked piece and respawns it. tryActivateWhoops
-        // refuses (no charge spent) if the player has no charge,
-        // no lock has happened yet this run, or gameplay is otherwise
-        // frozen by a menu / chisel / fill session.
+        // most recently locked piece and respawns it. The Whoops
+        // plugin (js/powerups/whoops.js) handles the dispatch via
+        // its interceptInput hook, refusing (no charge spent) if
+        // the player has no charge, no lock has happened yet this
+        // run, or gameplay is otherwise frozen by a menu / plugin
+        // modal.
         e.preventDefault();
-        game.tryActivateWhoops();
+        game._interceptInput('whoops');
         break;
       case 'p': case 'P':
         e.preventDefault();

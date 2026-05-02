@@ -56,13 +56,15 @@ export default {
         game.curses.cruelUntilLevel = 0;
         break;
       case 'growth':
-        // Stackable — drop one column's worth of curse. tryRemoveColumn
-        // refuses if the rightmost column has any locked block or any
-        // cell of the active piece in it; in that case we still
-        // decrement the counter so the HUD reflects the lifted curse,
-        // even though the visible width can't shrink right now.
+        // Stackable — drop one column's worth of curse. The actual
+        // column shrink lives on the Growth plugin and is requested
+        // through the service bus; it refuses internally if the
+        // rightmost column has any locked block or any cell of the
+        // active piece in it. In that case we still decrement the
+        // counter so the HUD reflects the lifted curse, even though
+        // the visible width can't shrink right now.
         game.curses.extraCols = Math.max(0, game.curses.extraCols - 1);
-        game.tryRemoveColumn?.();
+        game._interceptInput('growth:removeColumn');
         break;
     }
   },

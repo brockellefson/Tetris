@@ -1,10 +1,12 @@
 // Curse: Hyped — pieces fall one level faster (permanent, stackable).
 //
-// Implemented as an integer offset added to (level - 1) when the game
-// looks up GRAVITY. Picking Hyped twice = +2 levels of speed, etc.
+// State + behavior both live here now. Picking the curse increments
+// `game.curses.hyped` (kept on Game so the HUD reads it directly);
+// the gravity-table lookup index is bumped via the modifyGravityIndex
+// modifier hook, threaded through every plugin by Game.tick().
 //
-// The offset is clamped against the GRAVITY table inside Game.tick(),
-// so even at high stacks the lookup stays valid.
+// The lookup is clamped against the GRAVITY table inside Game.tick(),
+// so even at high stacks the index stays valid.
 
 export default {
   id: 'curse-hyped',
@@ -12,4 +14,10 @@ export default {
   description: 'Pieces fall one level faster.',
   available: () => true,
   apply: (game) => { game.curses.hyped += 1; },
+
+  // ---- lifecycle hooks ----
+
+  // Each Hyped stack adds 1 to the gravity-table lookup index, making
+  // the next gravity tick fire at the speed of (level + stacks).
+  modifyGravityIndex: (game, idx) => idx + game.curses.hyped,
 };

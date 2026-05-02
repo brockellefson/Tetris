@@ -13,6 +13,22 @@ import { playLockSound, playClearSound, playCycleSound, playSelectSound, playMen
 import { pickChoices } from './powerups/index.js';
 import { pickCurseChoices } from './curses/index.js';
 import { COLS, ROWS, BLOCK } from './constants.js';
+// Power-ups and curses that ship lifecycle hooks (tick / onSpawn /
+// shouldDeferLock / freezesGameplay / interceptInput / modifier hooks)
+// live alongside their card definitions and register here at boot so
+// Game.tick() can dispatch into them. Cards without hooks (Hold,
+// Ghost, Psychic, Mercy, Tired, Dispell, Junk, Rain) don't need to
+// register — they only mutate state in apply() and the engine reads
+// the result directly.
+import slickPlugin   from './powerups/slick.js';
+import whoopsPlugin  from './powerups/whoops.js';
+import chiselPlugin  from './powerups/chisel.js';
+import fillPlugin    from './powerups/fill.js';
+import gravityPlugin from './powerups/gravity.js';
+import flipPlugin    from './powerups/flip.js';
+import growthCurse   from './curses/growth.js';
+import hypedCurse    from './curses/hyped.js';
+import cruelCurse    from './curses/cruel.js';
 
 // -------- DOM lookup --------
 // Hint to the browser that none of these canvases need a transparent
@@ -401,6 +417,20 @@ function syncCursesUI() {
 
 // -------- Boot --------
 const game = new Game();
+
+// Register lifecycle plugins. Order doesn't matter today (no plugin
+// reads another's state during dispatch) but if it ever does, register
+// in the order you want hooks to fire.
+game.registerPlugin(slickPlugin);
+game.registerPlugin(whoopsPlugin);
+game.registerPlugin(chiselPlugin);
+game.registerPlugin(fillPlugin);
+game.registerPlugin(gravityPlugin);
+game.registerPlugin(flipPlugin);
+game.registerPlugin(growthCurse);
+game.registerPlugin(hypedCurse);
+game.registerPlugin(cruelCurse);
+
 game.onLock         = playLockSound;
 game.onLineClear    = playClearSound;
 // Reuse the power-up menu cycle blip for chisel/fill cursor movement —
@@ -520,16 +550,12 @@ function boardClickToCell(e) {
   return { col, row };
 }
 board$.addEventListener('click', (e) => {
-  if (game.chisel.active) {
-    const { col, row } = boardClickToCell(e);
-    game.chiselSelect(col, row);
-    return;
-  }
-  if (game.fill.active) {
-    const { col, row } = boardClickToCell(e);
-    game.fillSelect(col, row);
-    return;
-  }
+  // Generic board-click dispatch — chisel/fill (and any future cell
+  // picker) listen via interceptInput('boardClick', col, row) and
+  // claim the click only when their own active state matches. Click
+  // is silently dropped if no plugin wants it.
+  const { col, row } = boardClickToCell(e);
+  game._interceptInput('boardClick', col, row);
 });
 
 let lastTime = 0;

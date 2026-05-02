@@ -82,13 +82,15 @@ export const KICKS_I = {
 // 7-bag randomizer: shuffles all 7 piece types, guaranteeing
 // each appears once per cycle. Eliminates unfair piece droughts.
 //
-// `allowI` lets the caller exclude I-pieces, which the "Cruel"
-// curse uses to forbid line pieces for a level. The resulting
-// 6-piece bag preserves the rest of the bag's fairness guarantees.
-export function bagShuffle(allowI = true) {
-  const bag = allowI
-    ? ['I', 'O', 'T', 'S', 'Z', 'J', 'L']
-    : [     'O', 'T', 'S', 'Z', 'J', 'L'];
+// The optional `allows` predicate lets the caller filter the bag —
+// any type the predicate returns false for is dropped. Defaults to
+// "allow everything" so callers without a filter (tests, future
+// modes) get the standard 7-piece bag. Game.refillQueue threads a
+// plugin-aware filter through here so curses like Cruel can forbid
+// specific types (e.g. I-pieces) without bagShuffle needing to know
+// about any specific curse.
+export function bagShuffle(allows = () => true) {
+  const bag = ['I', 'O', 'T', 'S', 'Z', 'J', 'L'].filter(allows);
   for (let i = bag.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [bag[i], bag[j]] = [bag[j], bag[i]];
