@@ -45,7 +45,7 @@
 import {
   CLEAR_DURATION,
   GRAVITY_POWER_STEP,
-  LINE_SCORES,
+  lineClearScore,
   B2B_MULTIPLIER,
   COMBO_BONUS,
   PERFECT_CLEAR_BONUS,
@@ -135,7 +135,12 @@ function completeCascadeClear(game) {
 
   const wasB2B = (cleared === 4 && game.lastClearWasTetris);
 
-  let lineScore = LINE_SCORES[cleared] * game.level;
+  // lineClearScore tolerates cleared > 4 — the cascade can collapse
+  // many rows simultaneously when a Bomb (or chained specials) leaves
+  // a tall stack of full rows after the fall pass. Without the
+  // helper, LINE_SCORES[5] would be undefined and `score += NaN`
+  // would silently corrupt the score for the rest of the run.
+  let lineScore = lineClearScore(cleared) * game.level;
   if (wasB2B) lineScore = Math.floor(lineScore * B2B_MULTIPLIER);
   game.score += lineScore;
 

@@ -49,7 +49,32 @@ export const ARR  = 35;    // auto-repeat rate — interval between repeats
 export const SOFT = 30;    // soft-drop fall interval
 
 // Score table for line clears (1, 2, 3, 4 lines), multiplied by level.
+// Indexed by cleared-line count; entry 0 is the "no clear" fallback.
+// A normal player lock can clear at most 4 lines, but a CASCADE
+// triggered by a special block (Bomb / Gravity / chained specials)
+// can collapse 5+ rows at once when blocks fall into the void left
+// by the trigger. `lineClearScore` below extends the table for those
+// cases instead of returning `undefined` (which would multiply into
+// NaN and silently corrupt the score for the rest of the run).
 export const LINE_SCORES = [0, 100, 300, 500, 800];
+
+// Per-extra-line bonus when more than 4 rows clear in one batch.
+// Tuned so that 5 lines (1,100) pays a touch more than a Tetris (800),
+// 6 lines (1,400), 7 lines (1,700), etc. Linear growth past Tetris is
+// a deliberate choice — the cascade's per-clear scoring also stacks
+// combo + B2B + perfect-clear on top, so the marginal payoff is
+// already healthy without an exponential curve.
+export const EXTRA_LINE_BONUS = 300;
+
+// Look up the base line score for any number of cleared rows. Falls
+// back to the Tetris value plus EXTRA_LINE_BONUS per row beyond 4
+// when a cascade clears more than the static table covers.
+export function lineClearScore(cleared) {
+  if (cleared <= 0) return 0;
+  if (cleared < LINE_SCORES.length) return LINE_SCORES[cleared];
+  const tetris = LINE_SCORES[LINE_SCORES.length - 1];
+  return tetris + (cleared - (LINE_SCORES.length - 1)) * EXTRA_LINE_BONUS;
+}
 
 // Bonus scoring rules.
 //   B2B_MULTIPLIER     — Tetris-after-Tetris pays 1.5× the base line score.

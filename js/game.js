@@ -12,7 +12,7 @@
 // ============================================================
 
 import {
-  GRAVITY, DAS, ARR, SOFT, LINE_SCORES, CLEAR_DURATION,
+  GRAVITY, DAS, ARR, SOFT, lineClearScore, CLEAR_DURATION,
   CHISEL_DURATION, FILL_DURATION,
   SHAKE_DURATION, SHAKE_LOCK, SHAKE_HARDDROP,
   B2B_MULTIPLIER, COMBO_BONUS, PERFECT_CLEAR_BONUS,
@@ -600,7 +600,9 @@ export class Game {
     const wasB2B = (cleared === 4 && this.lastClearWasTetris);
 
     // Base line score (current level — level-up happens after).
-    let lineScore = LINE_SCORES[cleared] * this.level;
+    // lineClearScore handles cleared > 4, which a normal lock can't
+    // produce but a cascade-triggering special on a wide board can.
+    let lineScore = lineClearScore(cleared) * this.level;
     if (wasB2B) lineScore = Math.floor(lineScore * B2B_MULTIPLIER);
     this.score += lineScore;
 
