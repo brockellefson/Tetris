@@ -2,24 +2,40 @@
 // main.js — entry point
 // ============================================================
 //
-// Wires together the game, the renderer, and the input handler.
-// Owns the requestAnimationFrame loop and the DOM references.
+// Wires the engine, renderer, input, HUD, menus, and plugins
+// together. Owns the requestAnimationFrame loop and the lifecycle
+// callbacks (start / pause / resume). Most concrete UI logic lives
+// in dedicated modules — main.js is a wiring file.
+//
+// Module map:
+//   game.js              engine & state machine
+//   render.js            canvas drawing (board + minis)
+//   input.js             keyboard → game actions
+//   sound.js             Web-Audio SFX + UI-sound helper
+//   hud.js               score panel, blessing/curse tags, overlays,
+//                        notifications, chisel-hint banner
+//   menus/powerup.js     power-up + bundled-curse choice modal
+//   debug.js             pause-only developer panel
+//   powerups/, curses/   the actual blessings & debuffs
 // ============================================================
 
 import { Game } from './game.js';
 import { drawBoard, drawMini } from './render.js';
 import { setupInput } from './input.js';
-import { playLockSound, playClearSound, playCycleSound, playSelectSound, playMenuOpenSound, playMenuHoverSound, playMenuStartSound, playChiselSound, playFillSound, playFlipSound } from './sound.js';
-import { pickChoices } from './powerups/index.js';
-import { pickCurseChoices } from './curses/index.js';
+import {
+  playLockSound, playClearSound, playCycleSound, playMenuHoverSound,
+  playMenuStartSound, playChiselSound, playFillSound, playFlipSound,
+} from './sound.js';
 import { COLS, ROWS, BLOCK } from './constants.js';
-// Power-ups and curses that ship lifecycle hooks (tick / onSpawn /
-// shouldDeferLock / freezesGameplay / interceptInput / modifier hooks)
-// live alongside their card definitions and register here at boot so
-// Game.tick() can dispatch into them. Cards without hooks (Hold,
-// Ghost, Psychic, Mercy, Tired, Dispell, Junk, Rain) don't need to
-// register — they only mutate state in apply() and the engine reads
-// the result directly.
+import { setupHUD } from './hud.js';
+import { setupPowerupMenu } from './menus/powerup.js';
+import { setupDebug } from './debug.js';
+// Lifecycle plugins — power-ups and curses that ship hooks (tick /
+// onSpawn / shouldDeferLock / freezesGameplay / interceptInput /
+// modifier hooks). Cards without hooks (Hold, Ghost, Psychic,
+// Mercy, Tired, Dispell, Junk, Rain) don't need to register here —
+// they only mutate state in apply() and the engine reads the result
+// directly.
 import slickPlugin   from './powerups/slick.js';
 import whoopsPlugin  from './powerups/whoops.js';
 import chiselPlugin  from './powerups/chisel.js';
@@ -30,397 +46,33 @@ import growthCurse   from './curses/growth.js';
 import hypedCurse    from './curses/hyped.js';
 import cruelCurse    from './curses/cruel.js';
 
-// -------- DOM lookup --------
-// Hint to the browser that none of these canvases need a transparent
-// backing buffer — every cell either fills BG or a piece color, so
-// per-pixel alpha compositing is wasted work. Saves ~10–15% on paint.
-const board$        = document.getElementById('board');
-const ctx           = board$.getContext('2d', { alpha: false });
-const hold$         = document.getElementById('hold');
-const holdCtx       = hold$.getContext('2d', { alpha: false });
-const nextCanvases  = [...document.querySelectorAll('.next')];
-const nextCtxs      = nextCanvases.map(c => c.getContext('2d', { alpha: false }));
-const overlay       = document.getElementById('overlay');
-const notifs$       = document.getElementById('notifications');
-const scoreEl       = document.getElementById('score');
-const levelEl       = document.getElementById('level');
-const linesEl       = document.getElementById('lines');
-const holdPanel$    = document.getElementById('hold-panel');
-const nextPanel$    = document.getElementById('next-panel');
-const powerupMenu$    = document.getElementById('powerup-menu');
-const powerupCards$   = document.getElementById('powerup-cards');
-const menuScreen$     = document.getElementById('menu-screen');
-const playBtn$        = document.getElementById('play-btn');
-const blessingSection$ = document.getElementById('blessing-section');
-const blessingList$    = document.getElementById('blessing-list');
-const curseSection$   = document.getElementById('curse-section');
-const curseList$      = document.getElementById('curse-list');
-
-// -------- Floating notifications (combo / TETRIS / perfect clear) --------
-// CSS owns the animation; JS just appends the element and removes it
-// after the animation finishes. Multiple notifications stack vertically.
-function notify(text, type, duration = 1700) {
-  const el = document.createElement('div');
-  el.className = 'notification ' + type;
-  el.textContent = text;
-  notifs$.appendChild(el);
-  setTimeout(() => el.remove(), duration);
-}
-
-// -------- Overlay helpers --------
-function showOverlay(text, sub = '') {
-  overlay.innerHTML = text + (sub ? `<small>${sub}</small>` : '');
-  overlay.classList.remove('hidden');
-}
-function hideOverlay() {
-  overlay.classList.add('hidden');
-}
-
-// -------- Choice menu (power-up + bundled curse) --------
-// Each card pairs a power-up with a random curse. Picking the card
-// applies both — there is no separate curse menu anymore. The Game
-// freezes while pendingChoices > 0 (see Game.tick). After a card is
-// picked the menu hides and we ask the dispatcher whether another
-// power-up is queued (a tetris on first clear awards 2 picks).
+// -------- DOM lookups owned by main --------
+// Everything else lives inside its module. We keep here only what the
+// frame loop or the splash-screen / board-click wiring directly uses.
 //
-// Chisel / Fill interrupts this flow: while chisel.active or
-// chisel.target is set we never open the modal, because the modal
-// would block the click the power-up is waiting for. The dispatcher
-// gets called again via game.onChiselComplete / onFillComplete
-// once the relevant animation finishes.
-
-function buildChoiceMenu({ choices, onPick }) {
-  powerupCards$.innerHTML = '';
-  let selected = 0;
-  const cardEls = [];
-  choices.forEach((pair, i) => {
-    const { powerup, curse } = pair;
-    const card = document.createElement('button');
-    card.className = 'powerup-card';
-    // No-curse blessings (e.g. Dispell) render with the buff half only.
-    // Crucially, we must skip the curse template entirely — it interpolates
-    // `${curse.name}` and would crash on a null curse otherwise.
-    const cursePart = curse
-      ? `
-      <div class="powerup-card-curse">
-        <div class="powerup-card-curse-name">${curse.name}</div>
-        <div class="powerup-card-curse-desc">${curse.description}</div>
-      </div>`
-      : '';
-    card.innerHTML = `
-      <div class="powerup-card-buff">
-        <div class="powerup-card-name">${powerup.name}</div>
-        <div class="powerup-card-desc">${powerup.description}</div>
-      </div>${cursePart}
-      <div class="powerup-card-key"><kbd>${i + 1}</kbd></div>
-    `;
-    card.addEventListener('click', () => pick(pair));
-    card.addEventListener('mouseenter', () => setSelected(i));
-    powerupCards$.appendChild(card);
-    cardEls.push(card);
-  });
-
-  function setSelected(i) {
-    const next = ((i % choices.length) + choices.length) % choices.length;
-    // Only play the cycle blip when the highlight actually moves. This
-    // suppresses the sound on the initial setSelected(0) call and on
-    // mouseenter events that re-target the already-selected card.
-    if (next !== selected) {
-      playCycleSound();
-    }
-    selected = next;
-    cardEls.forEach((el, idx) => {
-      el.classList.toggle('selected', idx === selected);
-    });
-  }
-
-  // Highlight the first card by default so the player has a visible cursor.
-  setSelected(0);
-
-  function onKey(e) {
-    // We use stopImmediatePropagation so the keydown does NOT reach the
-    // gameplay handler in input.js. That matters for Enter/Space when
-    // picking the Chisel power-up: without this, the same Enter that
-    // confirms the menu would immediately fall through to chiselConfirm
-    // in input.js (both listeners are on `document`) and chisel the
-    // seeded cursor block before the player has a chance to navigate.
-    const stop = () => { e.preventDefault(); e.stopImmediatePropagation(); };
-
-    // Number-key shortcuts still work as a direct pick.
-    const numIdx = ['1', '2', '3'].indexOf(e.key);
-    if (numIdx !== -1 && numIdx < choices.length) {
-      stop();
-      pick(choices[numIdx]);
-      return;
-    }
-
-    switch (e.key) {
-      case 'ArrowLeft':
-      case 'ArrowUp':
-      case 'a': case 'A':
-        stop();
-        setSelected(selected - 1);
-        break;
-      case 'ArrowRight':
-      case 'ArrowDown':
-      case 'd': case 'D':
-        stop();
-        setSelected(selected + 1);
-        break;
-      case 'Enter':
-      case ' ':
-        stop();
-        pick(choices[selected]);
-        break;
-    }
-  }
-  document.addEventListener('keydown', onKey, { capture: true });
-
-  function pick(pair) {
-    document.removeEventListener('keydown', onKey, { capture: true });
-    playSelectSound();
-    powerupMenu$.classList.add('hidden');
-    // Defer the actual apply by one frame. Belt-and-suspenders alongside
-    // stopImmediatePropagation: even if a browser quirk lets the keystroke
-    // bypass that, by the time chisel/fill.active flips on, the Enter
-    // event that picked the card has long since finished propagating.
-    // Otherwise input.js's chisel/fill handler can see the same Enter
-    // and immediately confirm a placement before the player can navigate.
-    requestAnimationFrame(() => {
-      onPick(pair);
-      showNextChoice();
-    });
-  }
-
-  powerupMenu$.classList.remove('hidden');
-  // Audible cue that the menu just appeared — distinct from the cycle
-  // blip and the select chime so it can't be confused with either.
-  playMenuOpenSound();
-}
-
-function showPowerUpMenu() {
-  // showNextChoice may schedule us more than once per frame. Bail if
-  // the menu is already showing — the first scheduled call wins.
-  if (!powerupMenu$.classList.contains('hidden')) return;
-  const powerups = pickChoices(game, 3);
-  // Defensive: if no power-ups are eligible (player already unlocked
-  // all), drop the pending count and resume play. Curses don't show
-  // up on their own anymore — they only ride along with power-ups.
-  if (powerups.length === 0) {
-    game.pendingChoices = 0;
-    return;
-  }
-  // Pair each power-up with a random distinct curse. pickCurseChoices
-  // already shuffles, so zipping the two arrays yields a fresh random
-  // (powerup, curse) pairing every time the menu opens.
-  const curses = pickCurseChoices(game, powerups.length);
-
-  // Forbid pairings where the bundled curse exactly cancels its
-  // power-up on the same card — picking it would be a free no-op
-  // trade (you'd eat the debuff for a buff that the debuff just
-  // undid).
-  //
-  //   Tired + Hyped — Tired clamps gravity to level 1 speed, Hyped
-  //                   bumps the gravity table offset; cancel out.
-  //   Mercy + Cruel — Mercy unshifts an I-piece onto the queue,
-  //                   Cruel's apply() then filters all I-pieces out
-  //                   of the queue; the Mercy effect is wiped before
-  //                   the player ever sees it.
-  //
-  // For each conflict, swap the offending curse into another slot.
-  // Each listed power-up is unique in the pool (one entry in
-  // ALL_POWERUPS), so swapping the curse can't accidentally land it
-  // on a second copy of the same conflicting power-up.
-  const CANCELING_PAIRS = [
-    { powerup: 'tired', curse: 'curse-hyped' },
-    { powerup: 'mercy', curse: 'curse-cruel' },
-  ];
-  for (const { powerup: pId, curse: cId } of CANCELING_PAIRS) {
-    const pIdx = powerups.findIndex(p => p.id === pId);
-    if (pIdx === -1 || curses[pIdx]?.id !== cId) continue;
-    const swapIdx = curses.findIndex((c, i) => i !== pIdx && c?.id !== cId);
-    if (swapIdx !== -1) {
-      [curses[pIdx], curses[swapIdx]] = [curses[swapIdx], curses[pIdx]];
-    }
-  }
-
-  const choices = powerups.map((powerup, i) => ({
-    powerup,
-    // Blessings flagged `noCurse` (e.g. Dispell) intentionally carry no
-    // bundled curse — picking them is a pure positive. Otherwise fall
-    // back gracefully if somehow there are fewer eligible curses than
-    // power-ups (curses are all always-available today, so the `?? null`
-    // branch is purely defensive). A null curse means picking the card
-    // just applies the power-up cleanly with no debuff.
-    curse: powerup.noCurse ? null : (curses[i % Math.max(curses.length, 1)] ?? null),
-  }));
-  buildChoiceMenu({
-    choices,
-    onPick: ({ powerup, curse }) => {
-      game.applyPowerUp(powerup);
-      if (curse) game.applyCurse(curse);
-    },
-  });
-}
-
-// Decide whether to surface the menu next (or not). Called any time
-// pendingChoices changes: after picking a card, after the chisel /
-// fill animation finishes, and from the Game-side onPowerUpChoice
-// hook.
-function showNextChoice() {
-  // Don't pop a modal post game-over (junk-curse can trigger game over
-  // mid-completeClear, *before* the choice hook fires).
-  if (game.gameOver) return;
-  // Don't pop a modal while chisel or fill is mid-interaction —
-  // the modal would steal the click/keyboard focus the power-up needs.
-  if (game.chisel.active || game.chisel.target) return;
-  if (game.fill.active || game.fill.target) return;
-  // Don't pop a modal while the Gravity cascade is still running —
-  // any picks earned mid-cascade (e.g. milestones from gravity-
-  // induced line clears) queue up behind onGravityComplete.
-  if (game.gravity.active) return;
-  // Don't open a second menu if one is already up.
-  if (!powerupMenu$.classList.contains('hidden')) return;
-
-  if (game.pendingChoices > 0) {
-    requestAnimationFrame(showPowerUpMenu);
-  }
-}
-
-// Restart should always come back to a clean menu state.
-function clearMenus() {
-  powerupMenu$.classList.add('hidden');
-}
-
-// Apply lock-state visibility to gated UI panels. Called every frame —
-// but only writes when the values actually change. Each .style.* write
-// invalidates layout, so guarding pays off.
-let _lastHoldDisplay = null;
-let _lastNextPanelDisplay = null;
-const _lastNextCanvasDisplay = new Array(nextCanvases.length).fill(null);
-function syncUnlocksUI() {
-  const holdD = game.unlocks.hold ? '' : 'none';
-  if (holdD !== _lastHoldDisplay) {
-    holdPanel$.style.display = holdD;
-    _lastHoldDisplay = holdD;
-  }
-  const nextD = game.unlocks.nextCount > 0 ? '' : 'none';
-  if (nextD !== _lastNextPanelDisplay) {
-    nextPanel$.style.display = nextD;
-    _lastNextPanelDisplay = nextD;
-  }
-  for (let i = 0; i < nextCanvases.length; i++) {
-    const d = i < game.unlocks.nextCount ? '' : 'none';
-    if (d !== _lastNextCanvasDisplay[i]) {
-      nextCanvases[i].style.display = d;
-      _lastNextCanvasDisplay[i] = d;
-    }
-  }
-}
-
-// -------- Chisel / Fill hint banner --------
-// Shared banner — chisel and fill reuse the same overlay element
-// since only one is ever active at a time. The text & styling tweak
-// based on which power-up is currently asking for a pick.
-const boardWrap$ = document.getElementById('board-wrap');
-const chiselHint$ = document.createElement('div');
-chiselHint$.id = 'chisel-hint';
-chiselHint$.classList.add('hidden');
-boardWrap$.appendChild(chiselHint$);
-
-function syncChiselUI() {
-  const chiselActive = game.chisel.active;
-  const fillActive = game.fill.active;
-  const active = chiselActive || fillActive;
-  if (chiselActive) {
-    chiselHint$.innerHTML = 'CLICK OR USE ARROW KEYS + ENTER TO CHISEL';
-  } else if (fillActive) {
-    chiselHint$.innerHTML = 'CLICK OR USE ARROW KEYS + ENTER TO FILL';
-  }
-  chiselHint$.classList.toggle('hidden', !active);
-  boardWrap$.classList.toggle('chiseling', active);
-}
-
-// -------- Active-blessing indicator --------
-// Mirror of syncCursesUI for the persistent buffs the player has
-// unlocked. We only surface unlocks that have an ongoing effect
-// (Hold, Ghost, Psychic) — one-shot consumables like Chisel,
-// Fill, and Mercy vanish once spent so showing them as a "blessing"
-// would be misleading. Cheap enough to recompute every frame.
-function syncBlessingsUI() {
-  const tags = [];
-  if (game.unlocks.hold)  tags.push('HOLD');
-  if (game.unlocks.ghost) tags.push('GHOST');
-  if (game.unlocks.slick) tags.push('SLICK');
-  if (game.unlocks.nextCount > 0) {
-    tags.push(game.unlocks.nextCount > 1
-      ? `PSYCHIC ×${game.unlocks.nextCount}`
-      : 'PSYCHIC');
-  }
-  // Banked Chisel / Fill consumables. Show the charge count so the
-  // player knows how many uses they have queued — drops off the list
-  // when fully spent.
-  if (game.unlocks.chiselCharges > 0) {
-    tags.push(game.unlocks.chiselCharges > 1
-      ? `CHISEL ×${game.unlocks.chiselCharges}`
-      : 'CHISEL');
-  }
-  if (game.unlocks.fillCharges > 0) {
-    tags.push(game.unlocks.fillCharges > 1
-      ? `FILL ×${game.unlocks.fillCharges}`
-      : 'FILL');
-  }
-  if (game.unlocks.flipCharges > 0) {
-    tags.push(game.unlocks.flipCharges > 1
-      ? `FLIP ×${game.unlocks.flipCharges}`
-      : 'FLIP');
-  }
-  // Whoops is capped at 1, so no ×N variant needed — just a plain
-  // tag while the charge is banked. Drops off the moment W is spent.
-  if (game.unlocks.whoopsCharges > 0) {
-    tags.push('WHOOPS');
-  }
-
-  blessingSection$.classList.toggle('hidden', tags.length === 0);
-  // Diff-friendly write — only touch the DOM if the set actually changed.
-  const next = tags.join(',');
-  if (blessingList$.dataset.tags !== next) {
-    blessingList$.dataset.tags = next;
-    blessingList$.innerHTML = tags.map(t => `<span class="blessing-tag">${t}</span>`).join('');
-  }
-}
-
-// -------- Active-curse indicator --------
-// Renders a tag for each curse currently affecting gameplay, under
-// the score panel. Cheap enough to recompute every frame.
-function syncCursesUI() {
-  const tags = [];
-  if (game.curses.junk)  tags.push('JUNK');
-  if (game.curses.hyped > 0) {
-    tags.push(game.curses.hyped > 1 ? `HYPED ×${game.curses.hyped}` : 'HYPED');
-  }
-  if (game.level <= game.curses.cruelUntilLevel) tags.push('CRUEL');
-  if (game.curses.extraCols > 0) {
-    tags.push(game.curses.extraCols > 1
-      ? `GROWTH ×${game.curses.extraCols}`
-      : 'GROWTH');
-  }
-
-  curseSection$.classList.toggle('hidden', tags.length === 0);
-  // Diff-friendly write — only touch the DOM if the set actually changed.
-  const next = tags.join(',');
-  if (curseList$.dataset.tags !== next) {
-    curseList$.dataset.tags = next;
-    curseList$.innerHTML = tags.map(t => `<span class="curse-tag">${t}</span>`).join('');
-  }
-}
+// alpha:false on the canvases tells the browser the backing buffer
+// has no transparent pixels — every cell either fills BG or a piece
+// color, so per-pixel alpha compositing is wasted work. ~10–15% paint
+// savings on the main board.
+const board$       = document.getElementById('board');
+const ctx          = board$.getContext('2d', { alpha: false });
+const hold$        = document.getElementById('hold');
+const holdCtx      = hold$.getContext('2d', { alpha: false });
+const nextCanvases = [...document.querySelectorAll('.next')];
+const nextCtxs     = nextCanvases.map(c => c.getContext('2d', { alpha: false }));
+const menuScreen$  = document.getElementById('menu-screen');
+const playBtn$     = document.getElementById('play-btn');
+const themeMusic$  = document.getElementById('theme-music');
 
 // -------- Boot --------
 const game = new Game();
+const hud = setupHUD();
+const powerupMenu = setupPowerupMenu(game);
+const debug = setupDebug(game);
 
 // Register lifecycle plugins. Order doesn't matter today (no plugin
-// reads another's state during dispatch) but if it ever does, register
-// in the order you want hooks to fire.
+// reads another's state during dispatch) but if it ever does,
+// register in the order you want hooks to fire.
 game.registerPlugin(slickPlugin);
 game.registerPlugin(whoopsPlugin);
 game.registerPlugin(chiselPlugin);
@@ -431,97 +83,112 @@ game.registerPlugin(growthCurse);
 game.registerPlugin(hypedCurse);
 game.registerPlugin(cruelCurse);
 
+// Engine → HUD/sound hooks. The engine fires these from gameplay
+// events; we route each to its appropriate side-effect.
 game.onLock         = playLockSound;
 game.onLineClear    = playClearSound;
-// Reuse the power-up menu cycle blip for chisel/fill cursor movement —
+// Reuse the menu cycle blip for chisel/fill cursor movement —
 // same UI-tick semantics, same sound.
 game.onCursorMove   = playCycleSound;
-// Confirm sounds for the actual chisel/fill placement — the hooks
-// fire in chiselSelect / fillSelect right after the board mutates.
+// Confirm sounds for the actual chisel/fill placement — fire in
+// chiselSelect / fillSelect right after the board mutates.
 game.onChiselHit    = playChiselSound;
 game.onFillHit      = playFillSound;
 // Flip fires only on a successful mirror — blocked attempts stay silent.
 game.onFlip         = playFlipSound;
-game.onCombo        = (n)   => notify(`COMBO × ${n}`, 'combo');
-game.onTetris       = (b2b) => notify(b2b ? 'BACK-TO-BACK TETRIS' : 'TETRIS', b2b ? 'b2b' : 'tetris', 1900);
-game.onPerfectClear = ()    => notify('PERFECT CLEAR', 'perfect', 2100);
-game.onPowerUpChoice  = ()  => showNextChoice();
-// When the chisel animation finishes, dispatch any deferred menu.
-game.onChiselComplete = ()  => showNextChoice();
-// Fill runs through the same menu-deferral flow. It fires either at
-// the end of the materialize animation (no line cleared) OR after a
-// fill-triggered line-clear animation completes.
-game.onFillComplete = ()  => showNextChoice();
-// Gravity blessing — fires once the cascade fully settles (no more
-// blocks fall, no more lines clear). Same menu-deferral flow as
-// chisel/fill so any picks earned via gravity-triggered line clears
-// surface in order behind the animation.
-game.onGravityComplete = ()  => showNextChoice();
-// Junk-curse FX: small notification so the row drop doesn't feel silent.
-game.onJunk           = (n) => notify(n > 1 ? `JUNK +${n}` : 'JUNK', 'b2b', 1400);
-game.onRain           = (n) => notify(n > 1 ? `RAIN +${n}` : 'RAIN', 'b2b', 1300);
+game.onCombo        = (n)   => hud.notify(`COMBO × ${n}`, 'combo');
+game.onTetris       = (b2b) => hud.notify(b2b ? 'BACK-TO-BACK TETRIS' : 'TETRIS', b2b ? 'b2b' : 'tetris', 1900);
+game.onPerfectClear = ()    => hud.notify('PERFECT CLEAR', 'perfect', 2100);
+// Power-up choice menu surfacing. Chisel / Fill / Gravity defer the
+// menu until their animation completes, so each fires its own
+// "okay, queue is clear" hook and we re-check via showNext().
+game.onPowerUpChoice    = () => powerupMenu.showNext();
+game.onChiselComplete   = () => powerupMenu.showNext();
+game.onFillComplete     = () => powerupMenu.showNext();
+game.onGravityComplete  = () => powerupMenu.showNext();
+// Curse FX notifications — the row drop / rain spray would feel
+// silent without a blip, so we surface a small notification.
+game.onJunk = (n) => hud.notify(n > 1 ? `JUNK +${n}` : 'JUNK', 'b2b', 1400);
+game.onRain = (n) => hud.notify(n > 1 ? `RAIN +${n}` : 'RAIN', 'b2b', 1300);
 
 // -------- Background theme music --------
-// Plain <audio loop> element handles the looping for us — we just
-// drive play / pause from the game's lifecycle callbacks. Browsers
-// require a user gesture before audio can start, so the first call
-// happens in onStart (triggered by the player's first key press).
-const themeMusic$ = document.getElementById('theme-music');
-themeMusic$.volume = 0.5; // sit under the SFX without drowning them
+// Plain <audio loop> handles the looping for us — we just drive
+// play / pause from the lifecycle callbacks. Browsers require a
+// user gesture before audio can start, so the first call happens
+// in onStart (triggered by the player's first key press).
+themeMusic$.volume = 0.5; // sit under SFX without drowning them
 function playTheme() {
   // .play() returns a promise that rejects if the browser still
-  // refuses (e.g. the gesture didn't propagate). Swallow the rejection
-  // so it doesn't show up as an unhandled error in the console.
+  // refuses (e.g. the gesture didn't propagate). Swallow the
+  // rejection so it doesn't show up as an unhandled error.
   const p = themeMusic$.play();
   if (p && typeof p.catch === 'function') p.catch(() => {});
 }
-function pauseTheme() {
-  themeMusic$.pause();
-}
+function pauseTheme() { themeMusic$.pause(); }
 
-// Hide the splash screen the very first time the game starts, and on
-// every restart afterwards (the menu is only meant for initial boot,
-// so subsequent R-restarts simply keep it hidden).
-function hideMenuScreen() {
-  menuScreen$.classList.add('hidden');
-}
+// Hide the splash screen the first time the game starts, and on
+// every restart afterwards (the menu is only meant for initial
+// boot; subsequent R-restarts simply keep it hidden).
+function hideMenuScreen() { menuScreen$.classList.add('hidden'); }
 
+// -------- Input lifecycle wiring --------
 setupInput(game, {
-  onStart:  () => { hideOverlay(); clearMenus(); hideMenuScreen(); playTheme(); },
-  onPause:  () => { showOverlay('PAUSED', 'PRESS P TO RESUME'); pauseTheme(); },
-  onResume: () => { hideOverlay(); playTheme(); },
+  onStart: () => {
+    hud.hideOverlay();
+    powerupMenu.clear();
+    hideMenuScreen();
+    playTheme();
+    // A fresh start hides any leftover debug surfaces (e.g. user
+    // restarted with R while the menu was open).
+    debug.hideMenu();
+    debug.hideLauncher();
+  },
+  onPause: () => {
+    hud.showOverlay('PAUSED', 'PRESS P TO RESUME');
+    pauseTheme();
+    // Pause is the only state where the Debug button is reachable —
+    // surfacing it elsewhere would let the player dump unlimited
+    // charges into a live game.
+    debug.showLauncher();
+  },
+  onResume: () => {
+    hud.hideOverlay();
+    playTheme();
+    debug.hideLauncher();
+    debug.hideMenu();
+  },
 });
 
-// Play button on the splash screen — same start path as the first
-// keypress in input.js. Wrapped in a guard so a stray double-click
-// after the game has already begun is a harmless no-op. The hover
-// chime gives the button some life, and the start chime fires
-// alongside the theme music swelling in.
+// -------- Splash screen Play button --------
+// Same start path as the first keypress in input.js. Wrapped in a
+// guard so a stray double-click after the game has already begun
+// is a harmless no-op. The hover chime gives the button some life,
+// and the start chime fires alongside the theme music swelling in.
 playBtn$.addEventListener('mouseenter', () => {
-  // Only ping while the splash is actually on screen — once the game
-  // has started, the button is hidden and any lingering hover events
-  // shouldn't trigger sound.
+  // Only ping while the splash is actually on screen — once the
+  // game has started, the button is hidden and any lingering hover
+  // events shouldn't trigger sound.
   if (game.started) return;
   playMenuHoverSound();
 });
 playBtn$.addEventListener('click', () => {
   if (game.started) return;
-  // Fire the start chime *before* game.start() so the AudioContext
-  // unlock latency doesn't push it noticeably behind the theme.
+  // Fire the start chime BEFORE game.start() so AudioContext unlock
+  // latency doesn't push it noticeably behind the theme.
   playMenuStartSound();
   game.start();
-  hideOverlay();
-  clearMenus();
+  hud.hideOverlay();
+  powerupMenu.clear();
   hideMenuScreen();
   playTheme();
 });
 
-// Keyboard parity with the click path — pressing Enter or Space while
-// the splash is up should also play the start chime, then fall through
-// to input.js's first-keypress handler which calls game.start().
-// We listen in capture phase so we run before input.js (which is on
-// document, bubble phase) — that way the chime is already scheduled
-// even though both handlers act on the same key event.
+// Keyboard parity with the click path — pressing Enter or Space
+// while the splash is up should also play the start chime, then
+// fall through to input.js's first-keypress handler which calls
+// game.start(). Capture phase so we run before input.js (which is
+// on document, bubble phase) — that way the chime is already
+// scheduled even though both handlers act on the same key event.
 document.addEventListener('keydown', (e) => {
   if (game.started) return;
   if (menuScreen$.classList.contains('hidden')) return;
@@ -543,7 +210,7 @@ function boardClickToCell(e) {
   const scaleY = board$.height / rect.height;
   const px = (e.clientX - rect.left) * scaleX;
   const py = (e.clientY - rect.top)  * scaleY;
-  // Read live width — the Growth curse can grow the board mid-run.
+  // Read live width — Growth can grow the board mid-run.
   const cols = game.board[0]?.length ?? COLS;
   const col = Math.floor(px / (board$.width  / cols));
   const row = Math.floor(py / (board$.height / ROWS));
@@ -552,24 +219,22 @@ function boardClickToCell(e) {
 board$.addEventListener('click', (e) => {
   // Generic board-click dispatch — chisel/fill (and any future cell
   // picker) listen via interceptInput('boardClick', col, row) and
-  // claim the click only when their own active state matches. Click
-  // is silently dropped if no plugin wants it.
+  // claim the click only when their own active state matches.
   const { col, row } = boardClickToCell(e);
   game._interceptInput('boardClick', col, row);
 });
 
+// -------- Frame loop --------
 let lastTime = 0;
 let prevGameOver = false;
 
-// Diff caches — every DOM/style write below invalidates layout or
-// composition, so we only flush on actual change. Mini canvases also
-// get a per-slot piece-type cache so we skip the redraw when the
-// queue/hold haven't shuffled.
+// Per-frame diff caches for canvas redraws. The mini canvases
+// (hold + next previews) only need a redraw when the displayed
+// piece actually changes; the shake transform only needs a write
+// when the offset is non-zero. Repainting these every frame is the
+// second-biggest waste in a naive loop after per-cell gradients.
 let _lastHold = undefined;
 const _lastNext = new Array(nextCanvases.length).fill(undefined);
-let _lastScoreText = '';
-let _lastLevelText = '';
-let _lastLinesText = '';
 let _lastTransform = '';
 let _shakeWasZero = true;
 
@@ -586,12 +251,11 @@ function frame(now) {
 
   // Keep the canvas pixel buffer in sync with the (possibly grown)
   // board width. Setting .width clears the canvas, so guard against
-  // doing it every frame — only when the column count actually changes.
+  // doing it every frame — only when the column count changes.
   const cols = game.board[0]?.length ?? COLS;
   const desiredWidth = cols * BLOCK;
   if (board$.width !== desiredWidth) board$.width = desiredWidth;
 
-  // Render
   drawBoard(ctx, board$, game);
 
   // Apply board shake as a CSS transform on the canvas. The wrap's
@@ -611,8 +275,6 @@ function frame(now) {
 
   // Mini previews only need to repaint when the displayed piece
   // changes (a piece locks, the player holds, or the queue shifts).
-  // Repainting them every frame is the second-biggest waste in the
-  // original loop after the per-cell gradient cost.
   if (_lastHold !== game.hold) {
     drawMini(hold$, holdCtx, game.hold);
     _lastHold = game.hold;
@@ -624,23 +286,13 @@ function frame(now) {
     }
   }
 
-  // Score/level/lines: TextNode writes still trigger a recalc of any
-  // ancestor with intrinsic sizing, so skip when unchanged.
-  const scoreText = game.score.toLocaleString();
-  if (scoreText !== _lastScoreText) { scoreEl.textContent = scoreText; _lastScoreText = scoreText; }
-  const levelText = String(game.level);
-  if (levelText !== _lastLevelText) { levelEl.textContent = levelText; _lastLevelText = levelText; }
-  const linesText = String(game.lines);
-  if (linesText !== _lastLinesText) { linesEl.textContent = linesText; _lastLinesText = linesText; }
+  // Score / level / lines, blessing & curse tags, hold/next panel
+  // visibility, chisel hint banner.
+  hud.sync(game);
 
-  syncUnlocksUI();
-  syncChiselUI();
-  syncBlessingsUI();
-  syncCursesUI();
-
-  // Game-over overlay (edge-triggered so we don't repaint every frame)
+  // Game-over overlay (edge-triggered so we don't repaint every frame).
   if (game.gameOver && !prevGameOver) {
-    showOverlay('GAME OVER', 'PRESS R TO RESTART');
+    hud.showOverlay('GAME OVER', 'PRESS R TO RESTART');
     prevGameOver = true;
   } else if (!game.gameOver && prevGameOver) {
     prevGameOver = false;

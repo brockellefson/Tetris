@@ -518,6 +518,43 @@ export function playFlipSound() {
   noise.stop(now + dur);
 }
 
+// ============================================================
+// UI sound helper
+// ============================================================
+//
+// `wireMenuSounds(el, opts)` attaches the project's standard menu
+// audio cues (cycle blip on hover, select chime on click) to any
+// element with a single call. Used by every interactive surface in
+// the debug menu, the splash buttons, and any future menu — see
+// CLAUDE.md → "UI conventions" for the rationale and when to pick
+// which sound for which kind of button.
+//
+// Options (all optional):
+//   hover       — function called on mouseenter (default: playCycleSound).
+//                 Pass null to skip the hover binding entirely. Pass
+//                 playMenuHoverSound for primary launcher buttons,
+//                 playCycleSound for items inside a list/grid.
+//   click       — function called on click (default: playSelectSound).
+//                 Pass null to skip. Pass playSelectSound for commits,
+//                 playCycleSound for incremental nudges, or
+//                 playMenuOpenSound when the click opens a new modal.
+//   shouldPlay  — predicate gating both cues; return false to suppress
+//                 sounds (e.g. while the menu is hidden) so stale
+//                 mouseenter events from a closing modal can't ping.
+//                 Defaults to () => true (always play).
+export function wireMenuSounds(el, {
+  hover = playCycleSound,
+  click = playSelectSound,
+  shouldPlay = () => true,
+} = {}) {
+  if (hover) {
+    el.addEventListener('mouseenter', () => { if (shouldPlay()) hover(); });
+  }
+  if (click) {
+    el.addEventListener('click', () => { if (shouldPlay()) click(); });
+  }
+}
+
 // Soft low "thump" played when a fill power-up materializes a block.
 // A short sine drop from 220 Hz to 110 Hz reads as something solid
 // settling into place — opposite character from the chisel "crack."

@@ -9,7 +9,7 @@ Tetris/
 ├── index.html        ← markup only
 ├── styles.css        ← all styling
 └── js/
-    ├── main.js       ← entry point (boots everything, runs the rAF loop, registers plugins)
+    ├── main.js       ← entry point — wires modules, runs the rAF loop, registers plugins
     ├── constants.js  ← board size, colors, gravity table, timing, charge caps
     ├── pieces.js     ← tetromino shapes, SRS kick tables, 7-bag (filterable)
     ├── board.js      ← board grid, collision, line-clear (pure functions)
@@ -17,16 +17,22 @@ Tetris/
     ├── game.js       ← Game class — owns state, exposes actions, plugin runtime
     ├── render.js     ← canvas drawing (no game state mutation)
     ├── input.js      ← keyboard → game action mapping
-    ├── sound.js      ← Web Audio SFX
+    ├── sound.js      ← Web Audio SFX + wireMenuSounds() UI helper
+    ├── hud.js        ← score panel, blessing/curse tags, overlays, notifications, chisel-hint banner
+    ├── debug.js      ← pause-only developer panel (force blessings/curses, set level)
+    ├── menus/
+    │   └── powerup.js  ← power-up + bundled-curse choice modal
     ├── powerups/
-    │   ├── index.js  ← ALL_POWERUPS registry + pickChoices()
+    │   ├── index.js    ← ALL_POWERUPS registry + pickChoices()
     │   ├── hold.js, ghost.js, psychic.js, mercy.js, tired.js, dispell.js   ← simple flag-mutators
     │   └── slick.js, whoops.js, chisel.js, fill.js, gravity.js, flip.js    ← plugins (lifecycle hooks)
     └── curses/
-        ├── index.js  ← ALL_CURSES registry + pickCurseChoices()
+        ├── index.js    ← ALL_CURSES registry + pickCurseChoices()
         ├── junk.js, rain.js   ← one-shot mutations
         └── growth.js, hyped.js, cruel.js   ← plugins (lifecycle hooks)
 ```
+
+**`main.js` is a wiring file.** All concrete UI logic — HUD sync, the power-up modal, the debug panel — lives in dedicated modules. main.js just imports them, calls `setupHUD()` / `setupPowerupMenu(game)` / `setupDebug(game)` once at boot, and routes engine callbacks (`game.onTetris`, `game.onPowerUpChoice`, etc.) into the appropriate module method. Adding a new UI surface (e.g. a settings menu, a stats overlay) should follow the same pattern: a new file under `js/` or `js/menus/`, a `setupX(game?)` factory returning a small control object, and a couple of lines of wiring in main.js.
 
 ## Architectural principles
 
@@ -66,6 +72,17 @@ Each non-trivial power-up or curse exports a single object with a card definitio
 - `game.lockDelayTimer` — Slick's timer (Game initializes it; Slick reads/writes it)
 
 The decoupling is on the **behavior** side: the engine holds the data, plugins hold the logic.
+
+## UI conventions
+
+**Every interactive button must wire navigation and selection sounds.** The game leans heavily on synth audio cues, and a silent button feels broken. When adding a new button (in any menu, modal, HUD panel, or pause overlay), follow the same pattern the splash and power-up menus already use:
+
+- **Hover (`mouseenter`)** — call `playMenuHoverSound()` for primary launcher buttons (e.g. the `Play` button, `Debug` button) or `playCycleSound()` for items inside a list/grid the user is navigating through (e.g. power-up cards, debug pills, queue choices). Hover sounds should fire only when the menu is actually visible — guard with the relevant `.hidden` check so stale hovers stay silent.
+- **Click (or keyboard equivalent)** — call `playSelectSound()` for confirmations that commit a choice (picking a card, applying a debug action, hitting `SET`). Use `playMenuOpenSound()` when the click opens a new modal, and `playCycleSound()` for incremental nudges (`+`/`−` steppers, page-through controls) that don't commit anything.
+
+Sounds live in `js/sound.js` and are imported by `js/main.js`. If a new cue is needed, add it to `sound.js` following the existing Web-Audio-graph pattern (envelope + filter + oscillators) so it sits in the same pentatonic family as the rest of the game.
+
+**Show selected/active state visually.** Any toggle, multi-select, or "applied" state in a menu should mark the active option with the gold/yellow highlight (`var(--neon-yellow)` border + glow). The eye should never have to scan a long list to figure out what's already on. The debug menu's `.debug-pill.active` style is the canonical example — copy that visual when adding similar surfaces. Re-evaluate the active set whenever the menu opens AND after every click that could change it (e.g. Dispell removing a curse should drop the curse's highlight without the user needing to reopen the modal).
 
 ## Where to extend
 

@@ -65,6 +65,12 @@
         <canvas id="board" width="300" height="600"></canvas>
         <div id="notifications"></div>
         <div id="overlay" class="hidden">PAUSED<small>PRESS P TO RESUME</small></div>
+        <!-- Debug button — pinned inside the board wrap; only visible
+             while the game is paused. Clicking it opens #debug-menu so
+             the player can apply blessings & curses on demand and tune
+             the level for testing. main.js shows/hides it based on
+             game.paused. -->
+        <button id="debug-btn" class="hidden" type="button">DEBUG</button>
       </div>
 
       <div>
@@ -122,6 +128,43 @@
   <div id="powerup-menu" class="hidden">
     <div class="powerup-menu-inner">
       <div class="powerup-cards" id="powerup-cards"></div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       Debug menu — opens from the Debug button on the pause overlay.
+       Lets the developer apply any blessing or curse on demand, and
+       freely set the current level. Blessings applied through this
+       menu use unlimited charges (we set a huge counter and skip the
+       per-card cap), so testing power-ups doesn't burn through stock.
+       Hidden by default; main.js toggles `.hidden` and populates the
+       three sections (#debug-blessings, #debug-curses, level inputs).
+       ============================================================ -->
+  <div id="debug-menu" class="hidden">
+    <div class="debug-menu-inner">
+      <h2 class="debug-title">DEBUG</h2>
+
+      <section class="debug-section">
+        <h3>Level</h3>
+        <div class="debug-level-row">
+          <button id="debug-level-down" class="debug-mini-btn" type="button">&minus;</button>
+          <input id="debug-level-input" class="debug-level-input" type="number" min="1" value="1" />
+          <button id="debug-level-up" class="debug-mini-btn" type="button">&plus;</button>
+          <button id="debug-level-apply" class="debug-action-btn" type="button">SET</button>
+        </div>
+      </section>
+
+      <section class="debug-section">
+        <h3>Blessings <small>(unlimited charge)</small></h3>
+        <div class="debug-grid" id="debug-blessings"></div>
+      </section>
+
+      <section class="debug-section">
+        <h3>Curses</h3>
+        <div class="debug-grid" id="debug-curses"></div>
+      </section>
+
+      <button id="debug-close-btn" class="debug-close-btn" type="button">CLOSE</button>
     </div>
   </div>
 
