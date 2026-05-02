@@ -183,7 +183,7 @@ export const SPECIAL_RARITY_WEIGHTS = {
 // when `pendingChoices > 0` (i.e. a menu is actually about to open) —
 // during normal play between specials, the settle is set but does
 // nothing, so the player isn't input-locked between every bomb.
-export const SPECIAL_SETTLE_MS = 1000;
+export const SPECIAL_SETTLE_MS = 800;
 
 // Generic menu-settle pause — milliseconds the world waits between
 // "a milestone was earned" and "the level-up choice menu opens" for
