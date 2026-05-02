@@ -25,7 +25,10 @@ Tetris/
     ├── powerups/
     │   ├── index.js    ← ALL_POWERUPS registry + pickChoices()
     │   ├── hold.js, ghost.js, psychic.js, mercy.js, tired.js, dispell.js   ← simple flag-mutators
-    │   └── slick.js, whoops.js, chisel.js, fill.js, flip.js                ← plugins (lifecycle hooks)
+    │   ├── slick.js, whoops.js, chisel.js, fill.js, flip.js                ← plugins (lifecycle hooks)
+    │   ├── specials.js  ← Bomb I-III + Lightning I-III blessing-card tiers
+    │   │                 — picking a tier raises game.unlocks.specials[id]
+    │   └── lucky.js     ← Lucky I-III stack-card tiers (boost spawn rate)
     ├── curses/
     │   ├── index.js    ← ALL_CURSES registry + pickCurseChoices()
     │   ├── junk.js, rain.js   ← one-shot mutations
@@ -33,13 +36,24 @@ Tetris/
     ├── specials/
     │   ├── index.js    ← ALL_SPECIALS registry + weighted picker + the
     │   │                 specials plugin (decoratePiece + beforeClear +
-    │   │                 onClear + onCellRemoved + reset)
-    │   └── gravity.js  ← Gravity special — onTrigger calls startGravityCascade
+    │   │                 onClear + onCellRemoved + reset). Picker filters
+    │   │                 by `unlocks.specials[id] > 0` so unpicked specials
+    │   │                 don't spawn; specialChanceForLevel(level, lucky)
+    │   │                 factors in Lucky stacks.
+    │   ├── bomb.js     ← Bomb special — onTrigger reads its level from
+    │   │                 unlocks and carves a 3×3 / 4×4 / 5×5 square,
+    │   │                 then kicks the gravity cascade
+    │   ├── lightning.js ← Lightning special — onTrigger reads its level
+    │   │                  and strikes column-above (L1) / full column
+    │   │                  (L2) / column + row (L3)
+    │   └── welder.js   ← Welder special — onTrigger reads its level
+    │                      and fills the deepest hole (L1) / 3 deepest
+    │                      (L2) / every 3-sides-covered empty cell (L3)
     └── effects/
-        └── gravity-cascade.js  ← board-compaction engine (was the Gravity
-                                  power-up). Pure — no card metadata, just
-                                  freezesGameplay/tick hooks. Triggered today
-                                  by the Gravity special and the debug menu.
+        └── gravity-cascade.js  ← board-compaction engine. Pure — no card
+                                  metadata, just freezesGameplay/tick hooks.
+                                  Triggered today by Bomb detonations and
+                                  the debug menu's "Gravity Cascade" pill.
 ```
 
 **`main.js` is a wiring file.** All concrete UI logic — HUD sync, the power-up modal, the debug panel — lives in dedicated modules. main.js just imports them, calls `setupHUD()` / `setupPowerupMenu(game)` / `setupDebug(game)` once at boot, and routes engine callbacks (`game.onTetris`, `game.onPowerUpChoice`, etc.) into the appropriate module method. Adding a new UI surface (e.g. a settings menu, a stats overlay) should follow the same pattern: a new file under `js/` or `js/menus/`, a `setupX(game?)` factory returning a small control object, and a couple of lines of wiring in main.js.
@@ -111,30 +125,38 @@ The decoupling is on the **behavior** side: the bag holds plugin data, plugins h
 
 ## Special blocks
 
-A **special block** is metadata attached to a single mino. While the piece is falling, the special travels with it (anchored by piece-local rot-0 coords + the `transformLocalCoord` helper in `pieces.js`). When the piece locks, the special anchors to a board cell in the parallel grid at `game._pluginState.specials.boardGrid` (owned by the specials plugin). When that cell is removed — by a line clear, by Chisel, by a Bomb blast, by Lightning's column-clear, or by any future single-cell remover that fires `onCellRemoved` — the special's `onTrigger(game, x, y, source)` runs and decides what happens.
+A **special block** is metadata attached to a single mino. While the piece is falling, the special travels with it (anchored by piece-local rot-0 coords + the `transformLocalCoord` helper in `pieces.js`). When the piece locks, the special anchors to a board cell in the parallel grid at `game._pluginState.specials.boardGrid` (owned by the specials plugin). When that cell is removed — by a line clear, by Chisel, by a Bomb blast, by a Lightning strike, or by any future single-cell remover that fires `onCellRemoved` — the special's `onTrigger(game, x, y, source)` runs and decides what happens.
 
 Each special exports the same shape the power-ups and curses do, plus visual identity:
 
 ```js
 export default {
-  id: 'gravity',
-  name: 'Gravity',
-  description: 'When this block clears, every locked block falls to fill empty space below.',
-  rarity: 'rare',                                   // common|uncommon|rare|legendary
-  palette: ['#ffd700', '#ff8a1a', '#ff2e63'],       // colors to cycle through
-  animation: { speed: 1.6, glowBoost: 0.5 },        // cycles/sec + extra halo
+  id: 'bomb',
+  name: 'Bomb',
+  description: 'When this block breaks, every cell in the surrounding square is destroyed.',
+  rarity: 'common',                                 // common|uncommon|rare|legendary
+  palette: ['#ff1f3a', '#ff7a1a', '#ffe066'],       // colors to cycle through
+  animation: { speed: 2.4, glowBoost: 0.7 },        // cycles/sec + extra halo
   available: () => true,
-  onTrigger: (game, x, y, source) => { startGravityCascade(game); },
+  onTrigger: (game, x, y, source) => { /* … */ },
 };
 ```
 
 The renderer reads `palette` and `animation` generically — no per-special branching anywhere outside the special's own file. `rarity` drives both the spawn weight (via `SPECIAL_RARITY_WEIGHTS` in `constants.js`) and the visual amplification (via `RARITY_VFX` in `render.js`), so rarer specials look louder and spawn less often.
 
-**Spawn policy** is one constant curve (`SPECIAL_BLOCK_BASE_CHANCE` + `PER_LEVEL_BONUS` capped at `MAX_CHANCE`) plus weighted random over the eligible registry. The roll happens once per spawn inside the specials plugin's `decoratePiece` hook.
+**Specials are gated behind blessings.** Until the player picks the matching blessing card (Bomb / Lightning / Welder), `game.unlocks.specials[id]` is `0` and the spawn picker filters that special out — no Bomb-tagged minos roll on the board until Bomb has been picked at least once. Picking the same special's card again upgrades the unlock LEVEL (capped at `SPECIAL_MAX_LEVEL`):
+
+- **Bomb** — L1: 3×3 detonation. L2: 4×4. L3: 5×5.
+- **Lightning** — L1: column above. L2: full column. L3: full column + entire row.
+- **Welder** — L1: fills the single deepest hole. L2: fills 3 deepest holes. L3: fills every empty cell with 3+ sides covered.
+
+Each special's `onTrigger` reads its own current level from `game.unlocks.specials[id]` (defaulting to 1 if the slot is 0, which only happens via the debug "Force <Name>" pill). Upgrades retroactively buff every special-tagged cell already on the board, not just future spawns — picking Bomb III mid-run instantly turns suspended Bomb-tags into 5×5 detonations.
+
+**Spawn policy** is one constant curve (`SPECIAL_BLOCK_BASE_CHANCE` + `PER_LEVEL_BONUS` capped at `MAX_CHANCE`) plus weighted random over the *eligible* registry (specials with `unlocks.specials[id] > 0`). The roll happens once per spawn inside the specials plugin's `decoratePiece` hook. The **Lucky** blessing (3 stacks max) lifts each of the three knobs by `LUCKY_*_PER_STACK`, so a fully-stacked Lucky run feels rolling-in-specials. Lucky's card `available()` requires at least one special blessing to be unlocked first — Lucky alone does nothing, so the menu refuses to surface it before there's something to be lucky about.
 
 **Triggering on chisel** falls out of `onCellRemoved` — the chisel plugin fires the hook after nulling the cell, and the specials plugin's listener fires the cell's trigger. Bombs / lightning / any future single-cell special gets chisel-triggering for free.
 
-**Cascading triggers** — if a Gravity special on a row clears another row that contains another Gravity special, the second `onTrigger` call into `startGravityCascade` is idempotent (it refuses to re-enter when one is already running). The cascade runs through the same `beforeClear` → `removeRows` → `onClear` pipeline as a player-driven clear, so chained specials work without special handling.
+**Cascading triggers** — if a Bomb's blast clears a row that contains a Lightning-tagged cell, the Lightning fires off as part of the same trigger chain. The cascade engine (`js/effects/gravity-cascade.js`) is idempotent (refuses to re-enter when one is already running). The cascade runs through the same `beforeClear` → `removeRows` → `onClear` pipeline as a player-driven clear, so chained specials work without special handling.
 
 ## UI conventions
 
@@ -198,9 +220,11 @@ Slick, Whoops, Chisel, Fill, Flip all follow this pattern.
 Bomb, lightning, multiplier — anything that "fires when its block breaks." Pattern:
 
 1. Create `js/specials/foo.js`. Export a default object with `id`, `name`, `description`, `rarity` (`common` / `uncommon` / `rare` / `legendary`), `palette` (1+ hex colors to cycle through), `animation` (`{ speed, glowBoost }`), `available(game)`, and `onTrigger(game, x, y, source)`.
-2. Add the import + an entry in `ALL_SPECIALS` in `js/specials/index.js`. Done — the special now rolls in the spawn picker (weighted by rarity), renders with its palette + glow, and fires on both line clears and chisel.
-3. If `onTrigger` needs ongoing per-frame logic (a multi-step animation, a cascade), put the engine in a new file under `js/effects/` and register it as a plugin from `main.js` exactly like `gravity-cascade.js`. The special itself stays a tiny adapter that just calls into the engine.
-4. Add a "Force <Name>" pill to the debug menu — actually, you don't have to. The debug `Specials` grid auto-builds from `ALL_SPECIALS`, so the pill appears automatically.
+2. Add the import + an entry in `ALL_SPECIALS` in `js/specials/index.js`. The special now renders with its palette + glow and fires on both line clears and chisel — but it WON'T spawn yet, because nothing has picked the matching blessing.
+3. Wire up the unlock: add the new id to `game.unlocks.specials` in `Game.reset()` (initial value `0`), and add per-level blessing cards in `js/powerups/specials.js` following the `bomb1/2/3` pattern. Register the cards in `ALL_POWERUPS`. The picker auto-filters by `unlocks.specials[id] > 0`, so once the L1 card is picked the special starts spawning.
+4. If the special is leveled, have `onTrigger` read `game.unlocks.specials[id]` and branch on the level. Default to level 1 when the slot is 0 so the debug "Force <Name>" pill always produces a visible effect.
+5. If `onTrigger` needs ongoing per-frame logic (a multi-step animation, a cascade), put the engine in a new file under `js/effects/` and register it as a plugin from `main.js` exactly like `gravity-cascade.js`. The special itself stays a tiny adapter that just calls into the engine.
+6. Add a "Force <Name>" pill to the debug menu — actually, you don't have to. The debug `Specials` grid auto-builds from `ALL_SPECIALS`, so the pill appears automatically.
 
 ### Add a "no-curse" blessing
 

@@ -1,85 +1,109 @@
 // Special block: Lightning — when broken (line clear or chisel),
-// clears every cell in TWO columns: the one it sits in, plus one
-// adjacent column (left or right, chosen randomly per strike). When
-// the lightning sits on a board edge, the adjacent column is forced
-// to the only valid direction so the strike is always two full
-// columns wide. Each cleared cell with a special detonates via
-// onCellRemoved, so chained bombs / gravity tags / future specials
-// inside either column fire too.
+// destroys cells in a pattern that scales with the player's LIGHTNING
+// blessing level:
 //
-// Synergy: a Lightning-tagged piece placed adjacent to a Gravity-
-// tagged piece on the same row produces a beautiful combo. The line
-// clears, both specials trigger, the cascade runs, and the column-
-// shaped void Lightning carved is filled by falling blocks above it
-// — often completing more lines and triggering more specials in
-// turn. The architecture handles this for free: the cascade engine's
+//   Level 1 → every cell ABOVE this one in the same column.
+//   Level 2 → the entire column (above AND below).
+//   Level 3 → the entire column AND the entire row.
+//
+// The level is read from `game.unlocks.specials.lightning` at trigger
+// time, so picking the Lightning blessing card a second/third time
+// retroactively buffs every Lightning-tagged cell already on the board.
+// If the slot is 0 (which only happens via the debug "Force Lightning"
+// pill before the blessing has been picked), the strike falls back to
+// level 1 so the test pill always produces a visible effect.
+//
+// Each cleared cell with a special detonates via onCellRemoved, so
+// chained bombs / future specials inside the strike pattern fire too.
+// A Bomb-tagged cell on a Lightning-cleared row chains satisfying
+// damage; a Lightning-tagged cell hit by another Lightning re-strikes
+// once and stops (the trigger nulls the cell before the recursion
+// runs, so any second pass over the same cell is a no-op).
+//
+// Synergy with line clears: a Lightning-tagged piece placed adjacent
+// to a Bomb-tagged piece on the same row produces a beautiful combo.
+// The line clears, both specials trigger, the cascade runs, and the
+// column-shaped void Lightning carved is filled by falling blocks
+// above it — often completing more lines and triggering more specials
+// in turn. The architecture handles this for free: the cascade engine's
 // completeCascadeClear runs the same beforeClear → onClear pipeline
 // as a player-driven clear, so any specials it surfaces dispatch
 // through the same code path.
 //
 // Visuals: cyan → white → blue cycle, fast pulse (electric flicker
-// rather than the slower color shift Gravity uses). The brief shake
-// on trigger reads as the thunder following the strike.
+// rather than the slower color shift other specials use). The brief
+// shake on trigger reads as the thunder following the strike.
 
 import { SHAKE_HARDDROP } from '../constants.js';
 
-// Clear a single column. Extracted so the two-column strike below
-// can call it twice without duplicating the loop or the per-cell
-// onCellRemoved fan-out (which is what gives Lightning its chained-
-// special detonations and per-cell destruction scoring).
-function strikeColumn(game, cx) {
+// Remove a single cell at (x, y) if it's filled, fanning out the
+// onCellRemoved hook so chained specials in the strike pattern fire.
+// Centralized so the four pattern variants below all share one carve
+// path — keeps destruction-scoring (which lives on onCellRemoved in
+// specials/index.js) consistent regardless of which level fired the
+// strike.
+function carve(game, x, y) {
   const rows = game.board.length;
   const cols = game.board[0]?.length ?? 0;
-  if (cx < 0 || cx >= cols) return;
-  // Walk top-to-bottom so a debug observer sees a natural strike
-  // direction. The board mutation is synchronous so the order has
-  // no gameplay effect — only matters if a future listener cares
-  // about the sequence (e.g., a per-cell sparkle particle render).
-  for (let y = 0; y < rows; y++) {
-    if (!game.board[y][cx]) continue;
-    game.board[y][cx] = null;
-    game._notifyPlugins('onCellRemoved', cx, y, 'lightning');
-  }
+  if (x < 0 || x >= cols || y < 0 || y >= rows) return;
+  if (!game.board[y][x]) return;
+  game.board[y][x] = null;
+  game._notifyPlugins('onCellRemoved', x, y, 'lightning');
 }
 
-function strike(game, cx /*, cy, source */) {
+// Strike patterns — each takes (game, cx, cy) and walks every cell
+// the level should remove, calling carve() per cell. Deliberately
+// keep the cell at (cx, cy) inside the strike for ALL levels: the
+// trigger pipeline has already nulled the lightning's own cell in
+// `fireSpecialAt` before onTrigger runs, so the carve at (cx, cy) is
+// just a harmless no-op (board cell is already null) — but having it
+// inside the loop keeps the pattern math symmetric and easy to read.
+function strikeAbove(game, cx, cy) {
+  for (let y = 0; y <= cy; y++) carve(game, cx, y);
+}
+function strikeBelow(game, cx, cy) {
+  const rows = game.board.length;
+  for (let y = cy; y < rows; y++) carve(game, cx, y);
+}
+function strikeRow(game, cx, cy) {
+  const cols = game.board[0]?.length ?? 0;
+  for (let x = 0; x < cols; x++) carve(game, x, cy);
+}
+
+function strike(game, cx, cy /*, source */) {
   const cols = game.board[0]?.length ?? 0;
   if (cx < 0 || cx >= cols) return;
-  // Pick the adjacent column. On either edge there's only one valid
-  // neighbor, so we force the direction; otherwise flip a coin. This
-  // keeps every strike exactly two columns wide regardless of where
-  // the lightning landed — no awkward "single-column strike on the
-  // edge" exception for the player to learn.
-  let adj;
-  if (cx === 0)             adj = 1;
-  else if (cx === cols - 1) adj = cols - 2;
-  else                       adj = cx + (Math.random() < 0.5 ? -1 : 1);
-  // Strike both columns. strikeColumn is a no-op for out-of-range
-  // indices, so a 1-wide board (theoretically possible if Growth ever
-  // goes negative — it can't today, but guard anyway) just clears
-  // the one column without crashing.
-  strikeColumn(game, cx);
-  strikeColumn(game, adj);
+  const level = game.unlocks?.specials?.lightning ?? 0;
+  // Level 1 → above only.
+  // Level 2 → above + below (full column).
+  // Level 3 → above + below + entire row.
+  // The carves are additive: each upgrade is "level N - 1's pattern,
+  // plus one more axis." Same cell hit twice is harmless (carve()
+  // bails on already-null cells), so the row pass at L3 freely
+  // overlaps the column pass.
+  strikeAbove(game, cx, cy);
+  if (level >= 2) strikeBelow(game, cx, cy);
+  if (level >= 3) strikeRow(game, cx, cy);
   // Slightly less shake than a bomb — Lightning is sharp and
   // surgical, not a wide blast. Bomb's intensity reads as concussive,
-  // Lightning's as a precise crack. The shake intensity is unchanged
-  // from the single-column version: the second column adds visual
-  // weight, but the strike still reads as one thunderclap.
-  game.triggerShake?.(SHAKE_HARDDROP);
+  // Lightning's as a precise crack. Bump the intensity a hair at
+  // higher levels so the player feels the upgrade.
+  game.triggerShake?.(SHAKE_HARDDROP + (level - 1) * 0.6);
 }
 
 export default {
   id: 'lightning',
   name: 'Lightning',
+  // Generic across levels — the per-level wording lives on the
+  // blessing-card definition in js/powerups/specials.js.
   description:
-    'When this block breaks, its column AND one adjacent column are destroyed.',
+    'When this block breaks, it sends a strike through the column (and at higher levels, the row).',
   rarity: 'uncommon',
-  // Electric-ice palette — cyan-white-blue. Distinct from Gravity's
-  // warm gold and Bomb's hot red, so a glance at the board tells the
-  // player what's loaded where.
+  // Electric-ice palette — cyan-white-blue. Distinct from Bomb's hot
+  // red, so a glance at the board tells the player what's loaded where.
   palette: ['#00f0ff', '#ffffff', '#3a6dff'],
   animation: {
-    speed: 3.2,       // fastest cycle of the three — reads as electric flicker
+    speed: 3.2,       // fast cycle — reads as electric flicker
     glowBoost: 0.6,
   },
   available: () => true,

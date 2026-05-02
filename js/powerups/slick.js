@@ -23,12 +23,20 @@
 //   • onSpawn / onPlayerAdjustment reset the timer so each fresh
 //     piece (and each successful in-place adjustment) gets a full
 //     LOCK_DELAY window — the "step-reset" rule.
+//   • Step-resets are budgeted (LOCK_DELAY_MAX_RESETS per piece) to
+//     prevent the classic rotate-spam infinity. The budget refills
+//     whenever the piece reaches a new lowest row, so honest
+//     downward progress (gravity pulling the piece deeper, sliding
+//     into a hole) keeps adjustments available — only stalling in
+//     place at the same depth burns it down.
 //
 // State (`game.lockDelayTimer`) lives on the Game so other plugins
 // (Whoops, Gravity, Flip) can reset it directly when they're rewinding
-// or freezing the active piece. Renderer / HUD don't read it.
+// or freezing the active piece. The reset-budget counter and lowest-y
+// tracker live in the plugin-state bag at `_pluginState.slick`.
+// Renderer / HUD don't read either.
 
-import { LOCK_DELAY } from '../constants.js';
+import { LOCK_DELAY, LOCK_DELAY_MAX_RESETS } from '../constants.js';
 import { tryMove } from '../piece.js';
 
 export default {
@@ -40,19 +48,45 @@ export default {
 
   // ---- lifecycle hooks ----
 
+  // Claim the plugin-state slot. resetsRemaining gates further
+  // step-resets after the per-piece budget is spent; lowestY tracks
+  // the deepest row the active piece has ever reached so we can
+  // refill the budget when the piece falls further.
+  reset: (game) => {
+    game._pluginState.slick = { resetsRemaining: LOCK_DELAY_MAX_RESETS, lowestY: -Infinity };
+  },
+
   // Defer softDrop's immediate lock when Slick is unlocked. Without this,
   // a soft-drop that lands the piece would lock instantly and bypass
   // the delay window — the whole point of the power-up.
   shouldDeferLock: (game) => game.unlocks.slick,
 
-  // Step-reset on spawn — a brand-new piece always gets a full window.
-  onSpawn: (game) => { game.lockDelayTimer = 0; },
+  // Step-reset on spawn — a brand-new piece always gets a full window
+  // AND a fresh reset budget. lowestY seeds to the spawn row so the
+  // first time gravity pulls the piece down counts as new progress.
+  onSpawn: (game) => {
+    game.lockDelayTimer = 0;
+    const slickState = game._pluginState.slick;
+    if (slickState) {
+      slickState.resetsRemaining = LOCK_DELAY_MAX_RESETS;
+      slickState.lowestY = game.current ? game.current.y : -Infinity;
+    }
+  },
 
   // Step-reset on any successful in-place adjustment (move / rotate /
-  // flip) so the player can chain inputs into a tight slot. Game.move
-  // and Game.rotate fire this hook directly; Flip fires it from its
-  // own tryActivate path.
-  onPlayerAdjustment: (game) => { game.lockDelayTimer = 0; },
+  // flip) so the player can chain inputs into a tight slot — but only
+  // while the per-piece budget has resets left. Once exhausted, the
+  // timer keeps running and the piece will lock within LOCK_DELAY ms
+  // even if the player keeps spamming inputs. The budget is replenished
+  // by the tick() hook whenever the piece reaches a new lowest row.
+  onPlayerAdjustment: (game) => {
+    const slickState = game._pluginState.slick;
+    if (!slickState) { game.lockDelayTimer = 0; return; }
+    if (slickState.resetsRemaining > 0) {
+      game.lockDelayTimer = 0;
+      slickState.resetsRemaining -= 1;
+    }
+  },
 
   // The actual lock-delay timing loop. Runs every frame, but no-ops
   // when Slick isn't unlocked, when the game is frozen / clearing,
@@ -65,6 +99,18 @@ export default {
     // cell-pick, Gravity cascade), the active piece doesn't really
     // exist for the player — pause the timer.
     if (game._isFrozenByPlugin()) return;
+
+    // Refill the step-reset budget whenever the piece reaches a row
+    // it hasn't seen before. Catches gravity drops, soft drops, and
+    // sideways-into-a-hole all in one place — anything that lowers
+    // the piece's y counts as "made progress, you've earned more
+    // adjustments at this new depth."
+    const slickState = game._pluginState.slick;
+    if (slickState && game.current.y > slickState.lowestY) {
+      slickState.lowestY = game.current.y;
+      slickState.resetsRemaining = LOCK_DELAY_MAX_RESETS;
+    }
+
     const grounded = !tryMove(game.board, game.current, 0, 1);
     if (grounded) {
       game.lockDelayTimer += dt;

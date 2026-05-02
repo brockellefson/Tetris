@@ -60,20 +60,28 @@ import {
   SPECIAL_RARITY_WEIGHTS,
   SPECIAL_DESTROY_POINTS,
   SPECIAL_SETTLE_MS,
+  LUCKY_BASE_PER_STACK,
+  LUCKY_PER_LEVEL_PER_STACK,
+  LUCKY_MAX_PER_STACK,
 } from '../constants.js';
 import { PIECES, transformLocalCoord } from '../pieces.js';
-import gravitySpecial   from './gravity.js';
 import bombSpecial      from './bomb.js';
 import lightningSpecial from './lightning.js';
+import welderSpecial    from './welder.js';
 
 // Single source of truth for which specials exist. Order doesn't
 // matter — the picker re-shuffles by weight every roll. Adding a
 // new special is one new file plus one entry in this array; the
 // debug menu's "Force <name>" pills auto-build from it.
+//
+// Specials are gated on per-id unlock LEVELS (`game.unlocks.specials[id]`):
+// a special is only eligible to spawn once the matching blessing card
+// has been picked at least once. Until then the picker filters it out
+// and the spawn roll is a no-op even when the chance lands.
 export const ALL_SPECIALS = [
-  gravitySpecial,
   bombSpecial,
   lightningSpecial,
+  welderSpecial,
 ];
 
 // Index by id for O(1) lookup from the trigger pipeline (board cells
@@ -82,18 +90,29 @@ export const SPECIALS_BY_ID = Object.fromEntries(ALL_SPECIALS.map(s => [s.id, s]
 
 // ---- Spawn-roll math ----------------------------------------
 
-// The level-scaling chance curve. Centralized so debug tooling and
-// any future HUD readout can use the same number.
-export function specialChanceForLevel(level) {
-  const bonus = Math.max(0, level - 1) * SPECIAL_BLOCK_PER_LEVEL_BONUS;
-  return Math.min(SPECIAL_BLOCK_MAX_CHANCE, SPECIAL_BLOCK_BASE_CHANCE + bonus);
+// The level-scaling chance curve. Each Lucky stack lifts the base, the
+// per-level bonus, and the cap by the LUCKY_*_PER_STACK amounts (see
+// constants.js). Centralized so debug tooling and any future HUD
+// readout can use the same number.
+export function specialChanceForLevel(level, lucky = 0) {
+  const base    = SPECIAL_BLOCK_BASE_CHANCE     + lucky * LUCKY_BASE_PER_STACK;
+  const perLvl  = SPECIAL_BLOCK_PER_LEVEL_BONUS + lucky * LUCKY_PER_LEVEL_PER_STACK;
+  const maxCap  = SPECIAL_BLOCK_MAX_CHANCE      + lucky * LUCKY_MAX_PER_STACK;
+  const bonus   = Math.max(0, level - 1) * perLvl;
+  return Math.min(maxCap, base + bonus);
 }
 
-// Weighted random pick from the rarity tier of each available special.
-// Returns null if no specials are eligible (every available() returned
-// false, or the registry is empty).
+// Weighted random pick from the rarity tier of each ELIGIBLE special.
+// "Eligible" means: the player has unlocked it (`unlocks.specials[id] > 0`)
+// AND the special's optional `available(game)` returns true. Returns
+// null when nothing's eligible (the picker is then a no-op upstream
+// in maybeAttachSpecial).
 function pickWeightedSpecial(game) {
-  const eligible = ALL_SPECIALS.filter(s => s.available?.(game) ?? true);
+  const unlocked = game.unlocks?.specials ?? {};
+  const eligible = ALL_SPECIALS.filter(s => {
+    if ((unlocked[s.id] ?? 0) <= 0) return false;
+    return s.available?.(game) ?? true;
+  });
   if (eligible.length === 0) return null;
   let total = 0;
   for (const s of eligible) total += SPECIAL_RARITY_WEIGHTS[s.rarity] ?? 1;
@@ -132,11 +151,23 @@ export function maybeAttachSpecial(game, piece) {
   let chosen = null;
   const forced = s?.forceNext;
   if (forced) {
+    // Debug-menu force path bypasses the chance roll AND the unlock
+    // gate (so testers can stage a special before the player has the
+    // matching blessing). The trigger code defaults to level 1 when
+    // unlocks.specials[kind] is 0 — see bomb.js / lightning.js.
     s.forceNext = null;
     chosen = SPECIALS_BY_ID[forced];
     if (chosen && chosen.available?.(game) === false) chosen = null;
   } else {
-    if (Math.random() > specialChanceForLevel(game.level)) return piece;
+    // Bail BEFORE the chance roll if no special is unlocked — burning
+    // an RNG call to find an empty pool would just be wasted entropy
+    // (and would log as a non-deterministic call site under any future
+    // replay tooling).
+    const unlocked = game.unlocks?.specials ?? {};
+    const anyUnlocked = ALL_SPECIALS.some(s => (unlocked[s.id] ?? 0) > 0);
+    if (!anyUnlocked) return piece;
+    const lucky = game.unlocks?.lucky ?? 0;
+    if (Math.random() > specialChanceForLevel(game.level, lucky)) return piece;
     chosen = pickWeightedSpecial(game);
   }
   if (!chosen) return piece;

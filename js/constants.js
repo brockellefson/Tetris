@@ -122,9 +122,23 @@ export const COOLDOWN_LINES = 5;
 
 // Slick power-up — milliseconds a grounded piece can sit before locking,
 // giving the player a window to make split-second adjustments. The timer
-// resets on every successful move/rotate (step reset), so chained inputs
-// can extend the window indefinitely. Hard drops bypass this entirely.
+// resets on every successful move/rotate (step reset). Hard drops bypass
+// this entirely.
 export const LOCK_DELAY = 500;
+
+// Maximum number of step-resets a single piece can spend before its
+// lock-delay window stops refreshing. Without this cap, a player could
+// rotate-spam forever on a grounded piece and never lock — the classic
+// "lock-delay infinity" exploit. Once the budget is exhausted, the timer
+// keeps running (so the piece WILL lock within LOCK_DELAY ms) even if
+// the player keeps inputting moves/rotates.
+//
+// The budget is refreshed any time the piece reaches a new lowest row,
+// so genuine downward progress (sliding into a deeper hole, gravity
+// pulling the piece further down between adjustments) refills the
+// reset count and the player still gets to make adjustments at the
+// new resting depth. 15 is the modern guideline-Tetris standard.
+export const LOCK_DELAY_MAX_RESETS = 15;
 
 // Gravity cascade — milliseconds between each "fall step" while a
 // gravity-cascade is processing (today triggered only by the Gravity
@@ -143,14 +157,45 @@ export const GRAVITY_POWER_STEP = 120;
 // to 0 with PER_LEVEL_BONUS = 0 disables specials entirely; setting
 // MAX_CHANCE to 1 lets late-game pieces always carry one.
 //
-// Effective chance at level L:
-//   min(MAX, BASE + (L - 1) * PER_LEVEL_BONUS)
+// Effective chance at level L (with `lucky` = `unlocks.lucky` stacks):
+//   base    = SPECIAL_BLOCK_BASE_CHANCE       + lucky * LUCKY_BASE_PER_STACK
+//   per_lvl = SPECIAL_BLOCK_PER_LEVEL_BONUS   + lucky * LUCKY_PER_LEVEL_PER_STACK
+//   max     = SPECIAL_BLOCK_MAX_CHANCE        + lucky * LUCKY_MAX_PER_STACK
+//   p       = min(max, base + (L - 1) * per_lvl)
 //
-// The current curve: 5% at L1, 10% at L6, 15% at L11, 20% at L16
-// and beyond (clamped).
+// At Lucky 0 the curve is the historic 5% at L1, 10% at L6, 15% at L11,
+// 20% at L16+. At Lucky 3 it becomes 20% at L1, 24% at L2, 32% at L4
+// and clamped at 35% from L5 onward.
+//
+// The roll itself is gated upstream: with no special blessings unlocked
+// (`unlocks.specials.bomb` and `.lightning` both at 0), the spawn picker
+// finds no eligible specials and skips the roll regardless of the
+// computed chance.
 export const SPECIAL_BLOCK_BASE_CHANCE      = 0.05;
 export const SPECIAL_BLOCK_PER_LEVEL_BONUS  = 0.01;
 export const SPECIAL_BLOCK_MAX_CHANCE       = 0.20;
+
+// Lucky blessing — each stack (caps at 3) bumps each of the three
+// SPECIAL_BLOCK_* knobs by the corresponding amount. See the chance
+// formula above. Tuned so Lucky stays "rolls feel a bit luckier"
+// rather than "every piece is a bomb": at L1 with Lucky 3 the chance
+// is 20% (same ceiling as the unlucky late-game cap), and even with
+// Lucky 3 at high levels the cap clamps at 35% — the player still
+// has to plant the special-bearing piece thoughtfully.
+export const LUCKY_MAX_STACKS                 = 3;
+export const LUCKY_BASE_PER_STACK             = 0.05;
+export const LUCKY_PER_LEVEL_PER_STACK        = 0.01;
+export const LUCKY_MAX_PER_STACK              = 0.05;
+
+// Special block leveling — each special blessing (Bomb, Lightning) can
+// be picked up to MAX_LEVEL times. Picking the matching card increments
+// `game.unlocks.specials[id]` from 0 → 1 → 2 → 3 (capped). The trigger
+// code reads the level from the unlocks slot — so an upgrade
+// retroactively buffs every special-tagged block already on the board,
+// not just future spawns. (Choosing this over "level stamped at spawn"
+// makes upgrades feel rewarding the moment they're picked, and keeps
+// the boardSpecials grid simple — it stores the kind string only.)
+export const SPECIAL_MAX_LEVEL                = 3;
 
 // Rarity tiers for special blocks. Each special declares one of these
 // strings; the picker reads the weight, the renderer reads it again

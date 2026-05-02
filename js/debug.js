@@ -215,11 +215,71 @@ const DEBUG_BLESSINGS = [
   // Gravity isn't a card anymore — the pill kicks the cascade engine
   // directly so testers can still trigger the effect on demand. The
   // engine refuses if a cascade is already running, matching the
-  // production trigger path (the Gravity special block).
+  // production trigger path (Bomb detonations and any future cascade-
+  // triggering special). State lives in the plugin-state bag at
+  // `_pluginState.gravity.active`.
   { id: 'gravity', name: 'Gravity Cascade',
     apply: (g) => startGravityCascade(g),
-    isActive: (g) => g.gravity?.active === true },
+    isActive: (g) => g._pluginState?.gravity?.active === true },
   { id: 'dispell', name: 'Dispell', apply: (g) => dispellPlugin.apply(g), isActive: () => false },
+  // Special-block blessing tiers — Psychic-pattern toggles. Each tier
+  // pill apply()s by elevating the level to >= N; remove()s by
+  // demoting one tier (so clicking off Bomb III with level=3 leaves
+  // the player at Bomb II). Click order: I → II → III to climb;
+  // III → II → I to step back down.
+  { id: 'bomb1', name: 'Bomb I',
+    apply:    (g) => { g.unlocks.specials.bomb = Math.max(1, g.unlocks.specials.bomb); },
+    remove:   (g) => { g.unlocks.specials.bomb = 0; },
+    isActive: (g) =>   (g.unlocks.specials?.bomb ?? 0) >= 1 },
+  { id: 'bomb2', name: 'Bomb II',
+    apply:    (g) => { g.unlocks.specials.bomb = Math.max(2, g.unlocks.specials.bomb); },
+    remove:   (g) => { g.unlocks.specials.bomb = Math.min(g.unlocks.specials.bomb, 1); },
+    isActive: (g) =>   (g.unlocks.specials?.bomb ?? 0) >= 2 },
+  { id: 'bomb3', name: 'Bomb III',
+    apply:    (g) => { g.unlocks.specials.bomb = Math.max(3, g.unlocks.specials.bomb); },
+    remove:   (g) => { g.unlocks.specials.bomb = Math.min(g.unlocks.specials.bomb, 2); },
+    isActive: (g) =>   (g.unlocks.specials?.bomb ?? 0) >= 3 },
+  { id: 'lightning1', name: 'Lightning I',
+    apply:    (g) => { g.unlocks.specials.lightning = Math.max(1, g.unlocks.specials.lightning); },
+    remove:   (g) => { g.unlocks.specials.lightning = 0; },
+    isActive: (g) =>   (g.unlocks.specials?.lightning ?? 0) >= 1 },
+  { id: 'lightning2', name: 'Lightning II',
+    apply:    (g) => { g.unlocks.specials.lightning = Math.max(2, g.unlocks.specials.lightning); },
+    remove:   (g) => { g.unlocks.specials.lightning = Math.min(g.unlocks.specials.lightning, 1); },
+    isActive: (g) =>   (g.unlocks.specials?.lightning ?? 0) >= 2 },
+  { id: 'lightning3', name: 'Lightning III',
+    apply:    (g) => { g.unlocks.specials.lightning = Math.max(3, g.unlocks.specials.lightning); },
+    remove:   (g) => { g.unlocks.specials.lightning = Math.min(g.unlocks.specials.lightning, 2); },
+    isActive: (g) =>   (g.unlocks.specials?.lightning ?? 0) >= 3 },
+  // Welder tiers — same Psychic step pattern as Bomb / Lightning.
+  { id: 'welder1', name: 'Welder I',
+    apply:    (g) => { g.unlocks.specials.welder = Math.max(1, g.unlocks.specials.welder); },
+    remove:   (g) => { g.unlocks.specials.welder = 0; },
+    isActive: (g) =>   (g.unlocks.specials?.welder ?? 0) >= 1 },
+  { id: 'welder2', name: 'Welder II',
+    apply:    (g) => { g.unlocks.specials.welder = Math.max(2, g.unlocks.specials.welder); },
+    remove:   (g) => { g.unlocks.specials.welder = Math.min(g.unlocks.specials.welder, 1); },
+    isActive: (g) =>   (g.unlocks.specials?.welder ?? 0) >= 2 },
+  { id: 'welder3', name: 'Welder III',
+    apply:    (g) => { g.unlocks.specials.welder = Math.max(3, g.unlocks.specials.welder); },
+    remove:   (g) => { g.unlocks.specials.welder = Math.min(g.unlocks.specials.welder, 2); },
+    isActive: (g) =>   (g.unlocks.specials?.welder ?? 0) >= 3 },
+  // Lucky stacks — same Psychic-pattern step-down on remove. Clicking
+  // an unlocked Lucky tier when the requisite specials aren't unlocked
+  // is harmless (the spawn picker still gates on `unlocks.specials`),
+  // but the chance bump is dead weight without specials to spawn.
+  { id: 'lucky1', name: 'Lucky I',
+    apply:    (g) => { g.unlocks.lucky = Math.max(1, g.unlocks.lucky); },
+    remove:   (g) => { g.unlocks.lucky = 0; },
+    isActive: (g) =>   (g.unlocks.lucky ?? 0) >= 1 },
+  { id: 'lucky2', name: 'Lucky II',
+    apply:    (g) => { g.unlocks.lucky = Math.max(2, g.unlocks.lucky); },
+    remove:   (g) => { g.unlocks.lucky = Math.min(g.unlocks.lucky, 1); },
+    isActive: (g) =>   (g.unlocks.lucky ?? 0) >= 2 },
+  { id: 'lucky3', name: 'Lucky III',
+    apply:    (g) => { g.unlocks.lucky = Math.max(3, g.unlocks.lucky); },
+    remove:   (g) => { g.unlocks.lucky = Math.min(g.unlocks.lucky, 2); },
+    isActive: (g) =>   (g.unlocks.lucky ?? 0) >= 3 },
 ];
 
 // "Force a special on the next-spawned piece" pills. Reads ALL_SPECIALS

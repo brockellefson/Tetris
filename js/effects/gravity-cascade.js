@@ -8,13 +8,14 @@
 // score, B2B / combo / perfect-clear bonuses), and loops until the
 // board settles.
 //
-// This module used to be the Gravity power-up. It's been extracted
-// into a plain "effect" because the trigger source is no longer the
-// power-up menu — today it's the Gravity special block (see
-// js/specials/gravity.js) and the debug menu. Decoupling the engine
-// from any specific card lets future triggers (a curse? a key
-// combo? a chain reaction from another special?) call into the same
-// cascade without touching this file.
+// This module used to be the Gravity power-up, then briefly a
+// dedicated Gravity special block. It's now a plain "effect" with
+// no card or special metadata: today's trigger sources are Bomb
+// detonations (so falling debris fills the crater) and the debug
+// menu's "Gravity Cascade" pill. Decoupling the engine from any
+// specific card lets future triggers (a curse? a key combo? a
+// chain reaction from another special?) call into the same cascade
+// without touching this file.
 //
 // Public surface:
 //   startGravityCascade(game)   kick off a cascade — idempotent (refuses

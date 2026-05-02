@@ -204,6 +204,23 @@ export function setupHUD() {
       const cd = game._pluginState.whoops?.cooldown ?? 0;
       tags.push(cd > 0 ? cooldownTag('WHOOPS', cd) : plainTag('WHOOPS'));
     }
+    // Special-block blessings — show one tag per unlocked special with
+    // its current level (I/II/III). The trigger code reads the same
+    // slot, so an upgrade picked mid-run reflects here on the next
+    // sync tick. Suppressed at level 0 (the default) so an unpicked
+    // special doesn't clutter the bar.
+    const ROMAN = ['', 'I', 'II', 'III'];
+    const bombLvl = game.unlocks.specials?.bomb ?? 0;
+    if (bombLvl > 0) tags.push(plainTag(`BOMB ${ROMAN[bombLvl] ?? bombLvl}`));
+    const ltgLvl = game.unlocks.specials?.lightning ?? 0;
+    if (ltgLvl > 0) tags.push(plainTag(`LIGHTNING ${ROMAN[ltgLvl] ?? ltgLvl}`));
+    const wldLvl = game.unlocks.specials?.welder ?? 0;
+    if (wldLvl > 0) tags.push(plainTag(`WELDER ${ROMAN[wldLvl] ?? wldLvl}`));
+    // Lucky — count of stacks (×N) since it's a stackable buff. Same
+    // shorthand as Hyped/Growth so the curse and blessing surfaces
+    // read consistently.
+    const lucky = game.unlocks.lucky ?? 0;
+    if (lucky > 0) tags.push(plainTag(lucky > 1 ? `LUCKY ×${lucky}` : 'LUCKY'));
 
     blessingSection$.classList.toggle('hidden', tags.length === 0);
     const next = tags.map(t => t.key).join(',');

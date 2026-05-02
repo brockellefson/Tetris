@@ -25,9 +25,9 @@ import { setupInput } from './input.js';
 import {
   playLockSound, playClearSound, playCycleSound, playMenuHoverSound,
   playMenuStartSound, playChiselSound, playFillSound, playFlipSound,
-  playSpecialTriggerSound, playGravitySuckSound, playSpecialSpawnSound,
+  playSpecialTriggerSound, playSpecialSpawnSound,
   playBombSound, playLightningSound,
-  playGravitySpawnSound, playBombSpawnSound, playLightningSpawnSound,
+  playBombSpawnSound, playLightningSpawnSound,
 } from './sound.js';
 import { COLS, ROWS, BLOCK } from './constants.js';
 import { setupHUD } from './hud.js';
@@ -147,19 +147,16 @@ game.onRain = (n) => hud.notify(n > 1 ? `RAIN +${n}` : 'RAIN', 'b2b', 1300);
 // main.js wires the two together.
 const SPECIAL_SPAWN_SOUNDS = {
   // Each special's spawn cue is themed to evoke what it does:
-  //   gravity   — heavy descending pulse (you can feel the weight loaded)
   //   bomb      — fuse-lit tick + sizzle (something dangerous arrived)
   //   lightning — static crackle + rising tesla-coil charge (electrified)
   //
   // Anything not listed here falls back to playSpecialSpawnSound (the
   // generic electric jolt) — keeps newly-added specials immediately
   // audible while the sound design lands.
-  gravity:   playGravitySpawnSound,
   bomb:      playBombSpawnSound,
   lightning: playLightningSpawnSound,
 };
 const SPECIAL_TRIGGER_SOUNDS = {
-  gravity:   playGravitySuckSound,
   bomb:      playBombSound,
   lightning: playLightningSound,
 };

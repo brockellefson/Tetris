@@ -263,6 +263,24 @@ export class Game {
       fill:      false,
       whoops:    false,
       flip:      false,
+      // Special-block blessings — each entry is the current LEVEL of
+      // that special (0 = not unlocked, 1-3 = unlocked at that level).
+      // Picking the Bomb blessing card the first time sets bomb to 1;
+      // picking it again bumps it to 2, then 3 (capped at
+      // SPECIAL_MAX_LEVEL). Lightning behaves the same. With both at 0,
+      // the spawn picker in js/specials/index.js finds no eligible
+      // specials and skips the spawn-tag roll entirely. The trigger
+      // hooks in js/specials/<id>.js read the level from this slot, so
+      // an upgrade instantly buffs every special-tagged block already
+      // on the board.
+      specials:  { bomb: 0, lightning: 0, welder: 0 },
+      // Lucky blessing — how many times the Lucky card has been picked
+      // (0..LUCKY_MAX_STACKS). Each stack bumps the three special-spawn
+      // chance knobs (base, per-level, cap) by the LUCKY_*_PER_STACK
+      // amounts in constants.js. Lucky's `available()` requires at
+      // least one special blessing already unlocked, so the card only
+      // surfaces once the player has something to be lucky about.
+      lucky:     0,
     };
     // (Whoops snapshot state — prePieceSnapshot / whoopsSnapshot —
     // used to live here. It now lives as module-level state inside
@@ -331,7 +349,8 @@ export class Game {
   //   tryActivateFlip    → js/powerups/flip.js    ('flip:activate')
   //   tryActivateWhoops  → js/powerups/whoops.js  ('whoops')
   //   gravity cascade    → js/effects/gravity-cascade.js (tick + freezesGameplay,
-  //                        triggered by js/specials/gravity.js or debug menu)
+  //                        triggered by Bomb detonations or the debug menu's
+  //                        "Gravity Cascade" pill)
   //   slick lock-delay   → js/powerups/slick.js   (tick + shouldDeferLock)
   //   addColumn/tryRemoveColumn → js/curses/growth.js (apply / 'growth:removeColumn')
   //   addJunkRow/addJunkBatch   → js/curses/junk.js   (apply)
