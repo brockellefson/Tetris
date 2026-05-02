@@ -59,6 +59,7 @@ import {
   SPECIAL_BLOCK_MAX_CHANCE,
   SPECIAL_RARITY_WEIGHTS,
   SPECIAL_DESTROY_POINTS,
+  SPECIAL_SETTLE_MS,
 } from '../constants.js';
 import { PIECES, transformLocalCoord } from '../pieces.js';
 import gravitySpecial   from './gravity.js';
@@ -225,9 +226,31 @@ function runSpecialTrigger(game, def, x, y, source) {
   game.onSpecialTrigger?.(def.id, source);
   def.onTrigger?.(game, x, y, source);
   _triggerDepth--;
-  if (_triggerDepth === 0 && _triggerDestroyCount > 0) {
-    const points = _triggerDestroyCount * SPECIAL_DESTROY_POINTS * game.level;
-    game.onSpecialDestroy?.(def.id, _triggerDestroyCount, points);
+  if (_triggerDepth === 0) {
+    if (_triggerDestroyCount > 0) {
+      const points = _triggerDestroyCount * SPECIAL_DESTROY_POINTS * game.level;
+      game.onSpecialDestroy?.(def.id, _triggerDestroyCount, points);
+    }
+    // Arm the settle pause — a beat between "the special finished
+    // resolving" and "the power-up menu pops up." See the
+    // SPECIAL_SETTLE_MS comment in constants.js for the gate
+    // semantics. The timer is set unconditionally; whether it
+    // actually freezes gameplay is decided in freezesGameplay below
+    // (gated on pendingChoices > 0). The tick hook holds it at full
+    // duration while another plugin is freezing (e.g. a Gravity
+    // cascade kicked off by this same trigger), so the settle starts
+    // counting down only after the cascade has finished and the player
+    // can actually see the result.
+    //
+    // Clear Game's universal menu-settle so the two waits don't run
+    // in parallel — for a special clear we want ONLY the special
+    // settle, not max(special, menu). completeClear arms
+    // _menuSettleTimer eagerly when a milestone is earned, before it
+    // knows whether a special will trigger; this is where we retract
+    // it now that we know one did.
+    const s = specialsState(game);
+    if (s) s.settleTimer = SPECIAL_SETTLE_MS;
+    game._menuSettleTimer = 0;
   }
 }
 
@@ -277,6 +300,16 @@ export default {
       // Debug-menu queue: when set, the next spawnNext consumes this
       // id instead of rolling. Cleared by maybeAttachSpecial.
       forceNext: null,
+      // Post-trigger settle pause (ms remaining). Set to
+      // SPECIAL_SETTLE_MS at the end of every top-level
+      // runSpecialTrigger; counted down by this plugin's tick hook,
+      // BUT only while no other plugin is freezing and no clear
+      // animation is running (so a Gravity cascade kicked off by the
+      // trigger doesn't run the timer down before the player gets to
+      // see the cascade end). Gates `freezesGameplay` while > 0 AND
+      // `pendingChoices > 0` so normal play between specials isn't
+      // input-locked.
+      settleTimer: 0,
     };
     _pendingHoldSpecials = null;
     // Reset module-level trigger-batch counters. If a restart happens
@@ -314,6 +347,61 @@ export default {
     s.holdSpecials = snap.holdSpecials
                        ? snap.holdSpecials.map(sp => ({ ...sp }))
                        : null;
+  },
+
+  // ---- Settle pause (tick + freeze gates) ----
+  //
+  // After a top-level trigger ends, runSpecialTrigger arms
+  // `settleTimer = SPECIAL_SETTLE_MS`. We then:
+  //
+  //   • Hold the timer at full duration while another plugin is
+  //     freezing (the Gravity cascade, a future bomb-with-animation,
+  //     etc.) or the line-clear animation is running. This is the
+  //     "wait for the special's effect to finish playing out" gate —
+  //     a Gravity special triggered by a clear kicks off the cascade
+  //     synchronously inside runSpecialTrigger, so the timer is
+  //     already set before the cascade begins. Letting it count down
+  //     during the cascade would defeat the purpose.
+  //
+  //   • Once the world is otherwise quiet, decrement each frame until
+  //     it hits zero.
+  //
+  //   • freezesGameplay returns true while the timer is positive AND
+  //     `pendingChoices > 0`. The pending-choices gate is the whole
+  //     point: we only want to delay the level-up menu, not lock input
+  //     during normal play between bombs.
+  //
+  // Because `freezesGameplay` returns true during settle, Game's
+  // `_isBusy` stays true, the busy → idle transition tracker holds
+  // off `onPluginIdle`, and main.js doesn't get the cue to call
+  // `powerupMenu.showNext` until the settle completes. That's the
+  // single seam that ties this whole thing together.
+  //
+  // The loop in `tick` skips itself when checking "are other plugins
+  // freezing" — we obviously want to ignore our own freeze, otherwise
+  // the timer would never count down once we started enforcing it.
+
+  tick(game, dt) {
+    const s = specialsState(game);
+    if (!s || s.settleTimer <= 0) return;
+    if (game.isClearing()) return;
+    for (const p of game._plugins) {
+      if (p === this) continue;
+      if (p.freezesGameplay?.(game)) return;
+    }
+    s.settleTimer -= dt;
+    if (s.settleTimer < 0) s.settleTimer = 0;
+  },
+
+  freezesGameplay(game) {
+    const s = specialsState(game);
+    if (!s || s.settleTimer <= 0) return false;
+    // Only enforce the freeze when there's actually a level-up menu
+    // queued. Without this gate, every Bomb during normal play would
+    // lock input for SPECIAL_SETTLE_MS after the piece spawned, which
+    // feels laggy. The timer still counts down silently in that case
+    // and expires harmlessly.
+    return game.pendingChoices > 0;
   },
 
   // ---- Spawn — possibly attach a special ----

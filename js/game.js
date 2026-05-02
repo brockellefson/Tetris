@@ -16,6 +16,7 @@ import {
   CHISEL_DURATION, FILL_DURATION,
   SHAKE_DURATION, SHAKE_LOCK, SHAKE_HARDDROP,
   B2B_MULTIPLIER, COMBO_BONUS, PERFECT_CLEAR_BONUS,
+  MENU_SETTLE_MS,
 } from './constants.js';
 import { newBoard, collides, lockPiece, findFullRows, removeRows } from './board.js';
 import { spawn, tryMove, tryRotate, ghostPosition } from './piece.js';
@@ -123,11 +124,19 @@ export class Game {
   }
 
   // True if the engine is mid-modal — any freezing plugin OR a clear
-  // animation. Used by the busy-transition tracker in tick() to fire
-  // onPluginIdle exactly once when everything settles. Replaces the
-  // need for individual plugins to fire named completion callbacks.
+  // animation OR the post-clear menu-settle pause. Used by the
+  // busy-transition tracker in tick() to fire onPluginIdle exactly
+  // once when everything settles. Replaces the need for individual
+  // plugins to fire named completion callbacks.
+  //
+  // The menu-settle term is what gives every level-up clear (special
+  // or not) a brief beat between "milestone earned" and "menu opens"
+  // — see MENU_SETTLE_MS in constants.js. Stacks naturally with the
+  // specials plugin's own settle freeze (which gates on
+  // pendingChoices > 0), so a Bomb that earns a milestone waits the
+  // longer of the two before the menu surfaces.
   _isBusy() {
-    return this._isFrozenByPlugin() || this.isClearing();
+    return this._isFrozenByPlugin() || this.isClearing() || this._menuSettleTimer > 0;
   }
 
   // Returns true if any plugin claimed the action. Extra args
@@ -182,6 +191,15 @@ export class Game {
     // game.onPluginIdle. Reset to false here so a fresh game doesn't
     // spuriously fire onPluginIdle on its first tick.
     this._wasBusy = false;
+    // Menu-settle pause — milliseconds remaining before a freshly
+    // earned power-up choice is allowed to open its modal. Set to
+    // MENU_SETTLE_MS at the bottom of completeClear() (and the
+    // gravity cascade's completeCascadeClear) when milestonesEarned
+    // > 0; counted down in tick() but ONLY when the world is otherwise
+    // settled (no plugin freezing, no clear animating) so it doesn't
+    // tick away during a Gravity cascade or chisel pick. Zero means
+    // "no settle pending."
+    this._menuSettleTimer = 0;
     this.board       = newBoard();
     // (boardSpecials and holdSpecials used to live as named slots on
     // Game. Both are now owned by the specials plugin in its slot at
@@ -622,6 +640,16 @@ export class Game {
       milestonesEarned += 1;
     }
     this.pendingChoices += milestonesEarned;
+    // Arm the universal menu-settle pause whenever a clear actually
+    // earns the player a power-up choice. Without this, the modal
+    // pops the same frame the score / line / level numbers update —
+    // the player misses the satisfying tick. The timer is held at
+    // full duration by tick()'s gating until any in-flight modal
+    // (cascade, chisel, etc.) finishes, then drains and finally lets
+    // the menu open via the onPluginIdle transition.
+    if (milestonesEarned > 0) {
+      this._menuSettleTimer = MENU_SETTLE_MS;
+    }
 
     // Visual / FX hooks — fired in importance order so the notification
     // stack reads top-to-bottom: PERFECT > TETRIS/B2B > COMBO.
@@ -732,6 +760,20 @@ export class Game {
         this.shakeIntensity = 0;
         this.shakeTimer = 0;
       }
+    }
+
+    // Menu-settle countdown. Only ticks when no plugin is freezing
+    // and no line-clear animation is running — those are the things
+    // we're explicitly waiting on before "the world is calm enough
+    // to surface the level-up menu." A Gravity cascade kicked off by
+    // a special special holds this timer at full duration the same
+    // way it holds the specials plugin's own settle, so the menu
+    // doesn't sneak open while the cascade is mid-air.
+    if (this._menuSettleTimer > 0 &&
+        !this._isFrozenByPlugin() &&
+        !this.isClearing()) {
+      this._menuSettleTimer -= dt;
+      if (this._menuSettleTimer < 0) this._menuSettleTimer = 0;
     }
 
     // Plugin-idle transition: fire `onPluginIdle` once when the world

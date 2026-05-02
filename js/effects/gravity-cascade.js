@@ -49,6 +49,7 @@ import {
   B2B_MULTIPLIER,
   COMBO_BONUS,
   PERFECT_CLEAR_BONUS,
+  MENU_SETTLE_MS,
 } from '../constants.js';
 import { collides, findFullRows, removeRows } from '../board.js';
 
@@ -161,6 +162,15 @@ function completeCascadeClear(game) {
     milestonesEarned += 1;
   }
   game.pendingChoices += milestonesEarned;
+  // Arm the same universal menu-settle pause that completeClear uses
+  // when a milestone is earned. Held at full duration by Game.tick()
+  // until the cascade finishes (the cascade plugin freezes gameplay,
+  // and the timer's decrement gate refuses to count down while any
+  // plugin freezes), so the menu still won't surface mid-cascade —
+  // it just gets one extra beat after the cascade wraps up.
+  if (milestonesEarned > 0) {
+    game._menuSettleTimer = MENU_SETTLE_MS;
+  }
 
   if (perfect)         game.onPerfectClear?.();
   if (cleared === 4)   game.onTetris?.(wasB2B);

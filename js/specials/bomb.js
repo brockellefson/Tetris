@@ -8,6 +8,14 @@
 // nulled inside fireSpecialAt before the trigger runs, so the
 // re-entry guard there blocks loops.
 //
+// AFTER the 3×3 carve, the gravity cascade is kicked off so any
+// blocks left floating above the blast crater fall down to fill the
+// void. Without this the bomb leaves an awkward suspended ledge
+// hanging over a hole, which reads as buggy. startGravityCascade
+// is idempotent — a chained bomb (or a Gravity-tagged cell living
+// inside the blast zone) that re-enters it during an already-running
+// cascade is a harmless no-op.
+//
 // Visuals: hot red → orange → white pulse, big halo. The cycle is
 // fast enough to read as "ticking" against the cooler hues used by
 // other specials, so the player can recognize the bomb at a glance.
@@ -21,6 +29,7 @@
 // the literal 3×3 around the cell.
 
 import { SHAKE_HARDDROP } from '../constants.js';
+import { startGravityCascade } from '../effects/gravity-cascade.js';
 
 function detonate(game, cx, cy, source) {
   const rows = game.board.length;
@@ -47,6 +56,12 @@ function detonate(game, cx, cy, source) {
   // shake intensities, so a chained bomb cluster produces one
   // satisfying boom rather than stacking shake on shake.
   game.triggerShake?.(SHAKE_HARDDROP + 2);
+  // Drop everything above the crater. The cascade engine runs the
+  // standard fall → settle → maybe-clear pipeline, so any rows
+  // completed by the falling debris score and trigger their own
+  // specials normally. Idempotent across chained bombs: only the
+  // first call into the cascade per detonation actually starts one.
+  startGravityCascade(game);
 }
 
 export default {

@@ -150,6 +150,27 @@ export const SPECIAL_RARITY_WEIGHTS = {
   legendary: 1,
 };
 
+// Special-block settle pause — milliseconds the world freezes after a
+// top-level special trigger finishes, BEFORE the power-up choice menu
+// is allowed to surface. Gives the player a beat to read the bomb
+// blast / gravity cascade / lightning column / etc. instead of
+// immediately blowing it away with the level-up modal. Only enforced
+// when `pendingChoices > 0` (i.e. a menu is actually about to open) —
+// during normal play between specials, the settle is set but does
+// nothing, so the player isn't input-locked between every bomb.
+export const SPECIAL_SETTLE_MS = 1000;
+
+// Generic menu-settle pause — milliseconds the world waits between
+// "a milestone was earned" and "the level-up choice menu opens" for
+// a normal (non-special) line clear. Gives the player a moment to
+// see the score pop / line counter tick / level number bump before
+// the modal interrupts. When a special trigger fires on the same
+// clear, the specials plugin REPLACES this timer with its own
+// (longer) settle — see `runSpecialTrigger` in js/specials/index.js.
+// The two pauses are intentionally NOT additive: a special clear
+// uses only the special settle, never the sum.
+export const MENU_SETTLE_MS = 100;
+
 // Points awarded per cell destroyed via the onCellRemoved hook
 // (Bomb blast cells, Lightning column cells, Chisel hits, and any
 // future single-cell remover). Multiplied by the current level so

@@ -68,6 +68,80 @@ import growthCurse from './curses/growth.js';
 // realistically spend in a single test session.
 const DEBUG_UNLIMITED = 9999;
 
+// "Seed Board" — paint the bottom half of the playfield with random
+// tetromino-colored rubble so the tester can jump straight to a
+// mid-game position without manually stacking pieces. Tuning knobs:
+//   SEED_HEIGHT_FRAC  — fraction of the board height to fill from
+//                       the bottom (0.5 = bottom half).
+//   SEED_FILL_TOP     — per-cell fill probability on the topmost
+//                       seeded row (lots of holes — ragged "fresh
+//                       stack" look).
+//   SEED_FILL_BOTTOM  — per-cell fill probability on the very bottom
+//                       row (mostly filled — the kind of dense rubble
+//                       you accumulate after a few minutes of play).
+// Probability ramps linearly between the two, so the seeded region
+// reads as bottom-heavy rather than uniform fog. Every row is also
+// guaranteed at least one hole so seeding never produces an instant
+// line clear when the next piece lands.
+const SEED_HEIGHT_FRAC = 0.5;
+const SEED_FILL_TOP    = 0.55;
+const SEED_FILL_BOTTOM = 0.92;
+// The standard tetromino types. Skips JUNK / FILL because those are
+// reserved for the curse / power-up that places them — using them in
+// a player-initiated seed would muddle the visual vocabulary.
+const SEED_TYPES = ['I', 'O', 'T', 'S', 'Z', 'J', 'L'];
+
+function seedBoard(game) {
+  const cols = game.board[0]?.length ?? COLS;
+  const rows = game.board.length;
+  // Wipe the playfield (and the parallel specials grid) so the seed
+  // is the only thing on the board. Without clearing specials we'd
+  // get phantom triggers attached to seeded cells from whatever was
+  // there before the seed.
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) game.board[r][c] = null;
+  }
+  const sb = game._pluginState.specials;
+  if (sb?.boardGrid) {
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) sb.boardGrid[r][c] = null;
+    }
+  }
+  // Paint the bottom region. Rows iterate top-of-seed → floor; depth
+  // 0 = topmost seeded row (sparse), depth 1 = floor (dense).
+  const seedHeight = Math.max(1, Math.floor(rows * SEED_HEIGHT_FRAC));
+  const startRow = rows - seedHeight;
+  for (let r = startRow; r < rows; r++) {
+    const t = seedHeight === 1 ? 1 : (r - startRow) / (seedHeight - 1);
+    const fillProb = SEED_FILL_TOP + (SEED_FILL_BOTTOM - SEED_FILL_TOP) * t;
+    for (let c = 0; c < cols; c++) {
+      if (Math.random() < fillProb) {
+        game.board[r][c] = SEED_TYPES[Math.floor(Math.random() * SEED_TYPES.length)];
+      }
+    }
+    // Force at least one hole so the seed never lines up a Tetris on
+    // the next lock — would be confusing to seed mid-game and have it
+    // immediately collapse.
+    if (game.board[r].every(cell => cell)) {
+      game.board[r][Math.floor(Math.random() * cols)] = null;
+    }
+  }
+  // Reset state tied to the active piece — the seed invalidates any
+  // in-flight lock-delay window, drop accumulator, combo, or B2B
+  // streak (they describe the world we just overwrote). Then spawn a
+  // fresh piece at the top so the player isn't staring at rubble
+  // with no piece in play. Seed height tops out at half the board so
+  // the spawn at row 0 can't collide with the seeded region.
+  game.current = null;
+  game.lockDelayTimer = 0;
+  game.dropTimer = 0;
+  game.combo = 0;
+  game.lastClearWasTetris = false;
+  game.clearingRows = [];
+  game.clearTimer = 0;
+  game.spawnNext();
+}
+
 // Each blessing carries an `isActive(g)` predicate so the menu can
 // gold-highlight pills whose effect is currently live, AND a
 // `remove(g)` for toggleables. Charge-based cards read as active
@@ -219,6 +293,7 @@ export function setupDebug(game) {
   const debugLevelUp$    = document.getElementById('debug-level-up');
   const debugLevelDown$  = document.getElementById('debug-level-down');
   const debugLevelApply$ = document.getElementById('debug-level-apply');
+  const debugSeedBtn$    = document.getElementById('debug-seed-btn');
   const debugCloseBtn$   = document.getElementById('debug-close-btn');
 
   // Track each pill alongside its card so refreshActive() can
@@ -289,6 +364,12 @@ export function setupDebug(game) {
   wireMenuSounds(debugLevelUp$,    { hover: playCycleSound, click: playCycleSound,  shouldPlay: menuVisible });
   wireMenuSounds(debugLevelDown$,  { hover: playCycleSound, click: playCycleSound,  shouldPlay: menuVisible });
   wireMenuSounds(debugLevelApply$, { hover: playCycleSound, click: playSelectSound, shouldPlay: menuVisible });
+
+  // ---- Board seed control ----
+  // SEED commits a new board state, so it earns the same select chime
+  // as SET / a power-up pick.
+  debugSeedBtn$.addEventListener('click', () => { seedBoard(game); });
+  wireMenuSounds(debugSeedBtn$, { hover: playCycleSound, click: playSelectSound, shouldPlay: menuVisible });
   // Stop every key from bubbling to input.js so a stray "P" typed
   // into the level input doesn't trip the global pause toggle.
   // Enter commits as a SET click.
@@ -341,6 +422,7 @@ export function setupDebug(game) {
       debugLevelDown$,
       debugLevelUp$,
       debugLevelApply$,
+      debugSeedBtn$,
       ...pills.map(p => p.el),
       debugCloseBtn$,
     ],

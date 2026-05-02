@@ -18,10 +18,13 @@ export default {
   description:
     'When this block clears, every locked block falls to fill empty space below.',
   rarity: 'rare',
-  // Hot gold → ember orange → magenta-pink. Reads as "valuable" against
-  // the synthwave palette while being distinct from the I-piece cyan
-  // and the Z-piece magenta.
-  palette: ['#ffd700', '#ff8a1a', '#ff2e63'],
+  // Heavy gold → bronze → deep ultraviolet. The bronze and violet
+  // pull Gravity firmly out of Bomb's hot red/orange/yellow ember
+  // palette so the two specials read as distinct at a glance, while
+  // the gold preserves Gravity's "valuable / weighty" identity.
+  // Violet ties into the synthwave board-grid magenta and reads as
+  // "pulled down into the void," which suits the cascade fantasy.
+  palette: ['#ffd700', '#b8651f', '#6a2898'],
   animation: {
     speed: 1.6,       // palette cycles per second
     glowBoost: 0.5,   // extra shadowBlur factor

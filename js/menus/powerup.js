@@ -161,19 +161,17 @@ export function setupPowerupMenu(game) {
   // count so the freeze ends and play resumes.
   function showPowerUpMenu() {
     if (!powerupMenu$.classList.contains('hidden')) return;
-    // Re-check the freeze gates at open time. showNext() rAF-queues
-    // this function, and by the time the rAF fires a freezing plugin
-    // (Gravity cascade triggered by a special on the just-cleared
-    // row, etc.) may have flipped on. Defer back into showNext so
-    // the standard "wait for everything to settle → onPluginIdle →
-    // showNext" loop reopens us when the world has settled.
+    // Re-check the busy gates at open time. showNext() rAF-queues
+    // this function, and by the time the rAF fires a freeze (Gravity
+    // cascade triggered by a special on the just-cleared row, the
+    // post-trigger specials settle, the universal menu-settle pause,
+    // a chisel pick, etc.) may have flipped on. Defer back into
+    // showNext so the standard "wait for everything to settle →
+    // onPluginIdle → showNext" loop reopens us when the world has
+    // settled. game._isBusy covers chisel/fill/gravity/specials-settle/
+    // menu-settle/any future modal for free.
     if (game.gameOver) return;
-    const chiselS = game._pluginState.chisel;
-    const fillS   = game._pluginState.fill;
-    const gravS   = game._pluginState.gravity;
-    if (chiselS?.active || chiselS?.target) return;
-    if (fillS?.active || fillS?.target) return;
-    if (gravS?.active) return;
+    if (game._isBusy()) return;
     const powerups = pickChoices(game, 3);
     if (powerups.length === 0) {
       game.pendingChoices = 0;
@@ -210,21 +208,18 @@ export function setupPowerupMenu(game) {
 
   // Decide whether to surface the menu next. Called any time
   // pendingChoices changes: after picking a card, after a chisel /
-  // fill / gravity animation finishes, and from the engine's
-  // onPowerUpChoice hook.
+  // fill / gravity animation finishes, after the post-special-trigger
+  // settle pause expires, and from the engine's onPowerUpChoice hook.
   function showNext() {
     // Don't pop a modal post game-over (junk-curse can trigger game
     // over mid-completeClear, *before* the choice hook fires).
     if (game.gameOver) return;
-    // Don't pop while chisel/fill is mid-interaction — the modal
-    // would steal the click/keyboard focus the power-up needs.
-    const chiselS = game._pluginState.chisel;
-    const fillS   = game._pluginState.fill;
-    const gravS   = game._pluginState.gravity;
-    if (chiselS?.active || chiselS?.target) return;
-    if (fillS?.active || fillS?.target) return;
-    // Don't pop while the Gravity cascade is running.
-    if (gravS?.active) return;
+    // Don't pop while the engine is busy — any plugin freezing,
+    // a clear animating, or the universal menu-settle pause still
+    // counting down. Single check covers them all; the engine fires
+    // onPluginIdle on the busy → idle transition, which loops back
+    // here through main.js's onPluginIdle wiring.
+    if (game._isBusy()) return;
     // Don't open a second menu if one is already up.
     if (!powerupMenu$.classList.contains('hidden')) return;
 
