@@ -37,6 +37,44 @@
   </div>
 
   <div id="app">
+    <!-- Mobile / touch action bar — sits at the TOP of the column on
+         small screens so it never overlaps the playfield. Each button
+         dispatches through Game's public action methods or the plugin
+         service bus (`_interceptInput('chisel:activate')` etc.), so
+         touch and keyboard land on the same code paths.
+
+         Visibility is gated per-button by syncMobileButtons() in
+         main.js: hold appears once unlocked; chisel/fill/flip/whoops
+         appear once their charge counter > 0, with the count rendered
+         as a small neon badge. The whole bar collapses to nothing when
+         no buttons are visible (see the `is-empty` class) so an early-
+         game player who hasn't unlocked anything yet sees a clean
+         layout. The bar itself only appears at viewport widths ≤768px
+         (see the @media block in styles.css).
+
+         Pause is intentionally NOT in this bar — it lives as the
+         small icon button in the top-right corner below. -->
+    <div id="action-bar" class="action-bar">
+      <button class="action-btn hidden" data-action="hold"   type="button">
+        <span class="action-btn-label">HOLD</span>
+      </button>
+      <button class="action-btn hidden" data-action="chisel" type="button">
+        <span class="action-btn-label">CHISEL</span>
+        <span class="action-btn-badge"></span>
+      </button>
+      <button class="action-btn hidden" data-action="fill"   type="button">
+        <span class="action-btn-label">FILL</span>
+        <span class="action-btn-badge"></span>
+      </button>
+      <button class="action-btn hidden" data-action="flip"   type="button">
+        <span class="action-btn-label">FLIP</span>
+        <span class="action-btn-badge"></span>
+      </button>
+      <button class="action-btn hidden" data-action="whoops" type="button">
+        <span class="action-btn-label">WHOOPS</span>
+      </button>
+    </div>
+
     <div class="game">
       <div>
         <div class="panel" id="hold-panel">
@@ -86,7 +124,8 @@
          pinned in place regardless of how tall the Next/Hold panels
          render. Each row is a grid cell pair (kbd, label) so the kbds
          line up in a clean column instead of drifting around with the
-         label widths. -->
+         label widths. Hidden on small screens by the responsive CSS
+         block — the on-screen action bar takes its place there. -->
     <div class="controls">
       <kbd>P</kbd><span>pause</span>
       <kbd>C</kbd><span>hold</span>
@@ -94,6 +133,23 @@
       <kbd>S</kbd><span>fill</span>
       <kbd>F</kbd><span>flip</span>
     </div>
+
+    <!-- Pause toggle — pinned to the top-right corner on mobile. The
+         icon swaps between the universal pause glyph (two bars) when
+         the run is live and the play glyph (triangle) when the run is
+         paused, mirroring every video player ever. Hidden on desktop,
+         where the keyboard P key handles pause. Hidden when the game
+         isn't started or has ended; main.js's syncMobileButtons drives
+         the show/hide and the icon swap. -->
+    <button id="pause-btn" class="pause-btn hidden" type="button" aria-label="Pause">
+      <svg class="pause-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <rect x="6"  y="5" width="4" height="14" rx="1"/>
+        <rect x="14" y="5" width="4" height="14" rx="1"/>
+      </svg>
+      <svg class="play-icon"  viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M7 5 L18 12 L7 19 Z"/>
+      </svg>
+    </button>
   </div>
 
   <!-- ============================================================

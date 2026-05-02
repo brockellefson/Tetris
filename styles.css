@@ -879,3 +879,340 @@ canvas { display: block; }
   0%, 100% { box-shadow: 0 0 12px var(--neon-cyan), 0 0 22px rgba(0, 245, 255, 0.30); }
   50%      { box-shadow: 0 0 22px var(--neon-cyan), 0 0 44px rgba(0, 245, 255, 0.65); }
 }
+
+/* ============================================================
+   Mobile / touch action bar
+   ============================================================
+   Toolbar of buttons that map to the same actions the keyboard
+   handles on desktop. Lives in normal document flow at the TOP of
+   the column on mobile (see @media block) so it never overlaps the
+   playfield — the player always sees the entire grid.
+
+   Hidden by default at desktop widths; the mobile @media block
+   reveals it. Individual buttons inside the bar are gated by
+   syncMobileButtons() in main.js — hold appears once unlocked,
+   chisel/fill/flip/whoops appear once their charge counter > 0.
+
+   When no buttons are visible (early game, no consumables), main.js
+   adds the .is-empty class and the bar collapses to nothing so
+   the layout doesn't reserve dead space. Padding-right leaves room
+   for the top-right pause button so they never overlap. */
+.action-bar {
+  display: none;             /* shown only by the mobile @media block */
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 60px 8px 8px;  /* right padding clears the pause btn */
+  background: linear-gradient(180deg, rgba(20, 0, 43, 0.85) 0%, rgba(10, 0, 26, 0.92) 100%);
+  border: 1px solid var(--neon-pink);
+  border-radius: 8px;
+  box-shadow:
+    0 0 10px rgba(255, 42, 146, 0.4),
+    0 0 28px rgba(176, 38, 255, 0.25);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+/* Collapse when no consumables are visible — driven by main.js. */
+.action-bar.is-empty { display: none !important; }
+
+.action-btn {
+  position: relative;
+  min-width: 60px;
+  min-height: 48px;          /* WCAG-friendly tap target */
+  padding: 6px 10px;
+  background: linear-gradient(180deg, #2a0044 0%, #1a0033 100%);
+  border: 1px solid var(--neon-cyan);
+  border-radius: 6px;
+  color: var(--neon-cyan);
+  font-family: 'Orbitron', sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+  text-shadow: 0 0 4px var(--neon-cyan);
+  box-shadow:
+    0 0 6px rgba(0, 245, 255, 0.55),
+    inset 0 0 4px rgba(0, 245, 255, 0.25);
+  /* Suppress double-tap zoom and the iOS tap-highlight flash so the
+     button feels like a control, not a link. */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+.action-btn.hidden { display: none; }
+
+.action-btn:active {
+  transform: scale(0.96);
+  box-shadow:
+    0 0 12px var(--neon-cyan),
+    inset 0 0 8px rgba(0, 245, 255, 0.5);
+}
+
+/* Charge-count badge — small neon dot in the upper-right corner of
+   stackable consumables (Chisel / Fill / Flip). Empty when the
+   player has only one charge; populated as `×N` from N=2 upward. */
+.action-btn-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: var(--neon-pink);
+  color: #1a0033;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 18px;
+  text-align: center;
+  box-shadow: 0 0 6px var(--neon-pink);
+}
+.action-btn-badge:empty { display: none; }
+
+/* ---- Pause toggle (top-right corner, mobile only) ----
+   A small square button that swaps between the universal pause and
+   play icons depending on `game.paused`. Hidden on desktop and during
+   non-active runs (handled by syncMobileButtons + the @media block
+   below). The icons are inline SVGs so they take currentColor and
+   stay crisp at every DPR. */
+.pause-btn {
+  display: none;             /* shown by the mobile @media block */
+  position: fixed;
+  top: calc(8px + env(safe-area-inset-top, 0px));
+  right: calc(8px + env(safe-area-inset-right, 0px));
+  z-index: 5;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, #2a0044 0%, #1a0033 100%);
+  border: 1px solid var(--neon-cyan);
+  border-radius: 6px;
+  color: var(--neon-cyan);
+  cursor: pointer;
+  box-shadow:
+    0 0 6px rgba(0, 245, 255, 0.55),
+    inset 0 0 4px rgba(0, 245, 255, 0.25);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+.pause-btn.hidden { display: none; }
+.pause-btn:active {
+  transform: scale(0.94);
+  box-shadow:
+    0 0 12px var(--neon-cyan),
+    inset 0 0 8px rgba(0, 245, 255, 0.5);
+}
+.pause-btn svg {
+  width: 22px;
+  height: 22px;
+  filter: drop-shadow(0 0 4px var(--neon-cyan));
+}
+/* Icon swap — show pause glyph by default, show play glyph when the
+   game is paused. Either icon is hidden when not relevant so only one
+   ever takes layout space. */
+.pause-btn .play-icon  { display: none; }
+.pause-btn.is-paused .pause-icon { display: none; }
+.pause-btn.is-paused .play-icon  { display: block; }
+
+/* ============================================================
+   Responsive layout — narrow viewports (phones, small tablets)
+   ============================================================
+   The desktop layout is a 3-column grid (hold | board | next) with
+   a keyboard reference pinned bottom-right. None of that fits on a
+   ~380px-wide phone, so this block:
+
+     • Stacks the .game grid into a single column.
+     • Compresses the side panels into a tight horizontal strip
+       above and below the board.
+     • Shrinks the playfield canvas to fit available width via CSS
+       (the internal pixel buffer stays intact — boardClickToCell
+       and touch.js's pxToCell already scale correctly).
+     • Hides the keyboard `.controls` reference and reveals the
+       on-screen action bar.
+     • Restacks the choice menu cards vertically.
+     • Suppresses gestures we don't want (browser scroll/zoom on
+       the playfield).
+
+   Breakpoint chosen at 768px so iPad portrait + every phone gets
+   the touch layout. If you want to tune for a different cutoff,
+   change the value here. */
+@media (max-width: 768px) {
+  /* ----------------------------------------------------------------
+     Mobile layout — designed for ZERO layout shift. Every UI region
+     that can grow or shrink mid-run (action bar, blessing/curse HUD)
+     either pre-allocates its space or scrolls internally so the board
+     never moves and never gets squeezed.
+
+     Vertical strategy:
+       row 1: action bar    — min-height reserved, scrolls horizontally
+       row 2: hold + score  — fixed-ish, panel internals scroll
+       row 3: board         — takes ALL remaining vertical space
+       row 4: next pieces   — bottom strip, fixed compact height
+
+     Use 100dvh (with vh fallback) for the height so iOS Safari's
+     dynamic toolbar doesn't constantly resize the viewport during
+     gameplay — that was the second source of layout shake. ---- */
+  html, body { height: 100dvh; }
+
+  #app {
+    height: 100dvh;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 8px calc(8px + env(safe-area-inset-bottom, 0px));
+    gap: 8px;
+    overflow: hidden;          /* kill any chance of viewport scroll */
+  }
+
+  /* .game stretches to fill remaining height after the action bar.
+     Its three children (hold/score column, board, next column) become
+     a 3-row grid: side panels auto-size, board takes the rest. */
+  .game {
+    flex: 1 1 auto;
+    min-height: 0;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr auto;
+    gap: 8px;
+    width: 100%;
+    max-width: 480px;
+  }
+
+  /* Side-panel containers row-arrange their children so the hold
+     panel and score panel sit side by side instead of stacked. */
+  .game > div {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 8px;
+    justify-content: center;
+    align-items: stretch;
+    min-width: 0;
+  }
+
+  /* Tighter panel padding + capped height so growing tag lists never
+     push the board down. The blessing/curse sections inside scroll
+     horizontally if they overflow. */
+  .panel {
+    padding: 8px 10px;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .panel h2 { font-size: 9px; margin-bottom: 4px; letter-spacing: 1.5px; }
+  .stat     { font-size: 16px; margin-bottom: 4px; }
+
+  /* Hide the blessings list on mobile — the action bar already
+     surfaces every active consumable / unlock with its own button
+     and badge, so showing the same info twice just eats space. */
+  #blessing-section { display: none; }
+
+  /* Curse section stays (no equivalent in the action bar) but gets a
+     single-row scrollable strip so 5+ curses don't wrap and grow the
+     panel. */
+  #curse-section { margin-top: 4px; }
+  .curse-list {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;     /* Firefox */
+    -ms-overflow-style: none;  /* old Edge */
+  }
+  .curse-list::-webkit-scrollbar { display: none; }  /* WebKit */
+
+  /* Board takes whatever vertical space the 1fr row gives it, scaled
+     to fit. height-first sizing + width: auto preserves the canvas's
+     intrinsic aspect ratio (10:20). max-width keeps a too-tall slot
+     from running the board past the viewport on the sides. */
+  #board-wrap {
+    padding: 6px;
+    /* Default grid align-self is `stretch` — let the wrap fill its
+       1fr row so the canvas inside has a defined parent height. The
+       canvas centers itself via the flex rules below; align-self:
+       center on the wrap would create a circular dependency
+       (wrap-height-from-canvas, canvas-height-from-wrap = no resolve). */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
+    max-width: 100%;
+  }
+  #board {
+    display: block;
+    height: 100%;
+    width: auto;
+    max-width: 100%;
+    max-height: 100%;
+    /* touch.js owns gestures on the playfield. */
+    touch-action: none;
+  }
+
+  /* Next-piece previews — single tight horizontal strip at the
+     bottom. Each mini canvas shrinks so 5 fit a phone width. */
+  .next-list {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    justify-content: center;
+    gap: 4px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .next-list::-webkit-scrollbar { display: none; }
+  .mini { width: 56px; height: 40px; }
+
+  /* Hide the keyboard reference; the action bar takes its job. */
+  .controls { display: none; }
+
+  /* Reveal the touch action bar and the top-right pause toggle.
+     The bar reserves a fixed height even with zero buttons unlocked
+     so the row below never jumps when the first consumable appears.
+     If a player ever unlocks more buttons than fit in one row, the
+     bar scrolls horizontally rather than wrapping (which would also
+     cause a shift). */
+  .action-bar {
+    display: flex;
+    width: 100%;
+    max-width: 480px;
+    min-height: 60px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    flex: 0 0 auto;            /* don't let the bar grow in the column */
+  }
+  .action-bar::-webkit-scrollbar { display: none; }
+  /* When no consumables are visible, drop the visual chrome so the
+     reserved slot reads as empty space instead of an empty box. The
+     slot itself stays — that's the whole point. */
+  .action-bar.is-empty {
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .pause-btn  { display: inline-flex; }
+  .pause-btn.hidden { display: none; }
+
+  /* Choice menu — stack cards vertically and shrink them so all
+     three fit on a phone screen without scrolling. */
+  .powerup-cards {
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+    max-width: 360px;
+  }
+  .powerup-card {
+    width: 100%;
+    min-height: 0;
+    padding: 14px 16px;
+  }
+  .powerup-card-name,
+  .powerup-card-curse-name { font-size: 16px; margin-bottom: 8px; }
+  .powerup-card-desc,
+  .powerup-card-curse-desc { font-size: 11px; line-height: 1.4; }
+  .powerup-card-key { margin-top: 8px; }
+
+  /* Splash screen play button — bigger tap target on touch. */
+  .menu-btn { padding: 18px 36px; font-size: 18px; }
+}

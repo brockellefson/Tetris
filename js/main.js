@@ -9,6 +9,7 @@
 import { Game } from './game.js';
 import { drawBoard, drawMini } from './render.js';
 import { setupInput } from './input.js';
+import { setupTouch } from './touch.js';
 import { playLockSound, playClearSound, playCycleSound, playSelectSound, playMenuOpenSound, playMenuHoverSound, playMenuStartSound, playChiselSound, playFillSound, playFlipSound } from './sound.js';
 import { pickChoices } from './powerups/index.js';
 import { pickCurseChoices } from './curses/index.js';
@@ -55,6 +56,9 @@ const blessingSection$ = document.getElementById('blessing-section');
 const blessingList$    = document.getElementById('blessing-list');
 const curseSection$   = document.getElementById('curse-section');
 const curseList$      = document.getElementById('curse-list');
+const actionBar$      = document.getElementById('action-bar');
+const actionButtons$  = [...actionBar$.querySelectorAll('.action-btn')];
+const pauseBtn$       = document.getElementById('pause-btn');
 
 // -------- Floating notifications (combo / TETRIS / perfect clear) --------
 // CSS owns the animation; JS just appends the element and removes it
@@ -390,6 +394,75 @@ function syncBlessingsUI() {
   }
 }
 
+// -------- Mobile action bar --------
+// Visibility per button — driven by the same unlock state the
+// blessing HUD reads. We diff against a per-button cache so we only
+// touch the DOM when something actually changed.
+//
+// PAUSE is shown whenever a run has started and isn't over. HOLD
+// appears once the player owns the unlock. CHISEL / FILL / FLIP
+// surface only when the player has at least one charge banked, with
+// the count rendered as a small neon badge. WHOOPS is capped at 1,
+// so no badge — just present-or-not.
+const _btnState = Object.create(null); // key → "shown:badge"
+function updateButton(action, shown, badge = '') {
+  const btn = actionButtons$.find(b => b.dataset.action === action);
+  if (!btn) return;
+  const key = `${shown ? 1 : 0}:${badge}`;
+  if (_btnState[action] === key) return;
+  _btnState[action] = key;
+  btn.classList.toggle('hidden', !shown);
+  const badgeEl = btn.querySelector('.action-btn-badge');
+  if (badgeEl) badgeEl.textContent = badge;
+}
+function syncMobileButtons() {
+  updateButton('hold',   game.unlocks.hold);
+  updateButton('chisel', game.unlocks.chiselCharges > 0,
+                         game.unlocks.chiselCharges > 1 ? `×${game.unlocks.chiselCharges}` : '');
+  updateButton('fill',   game.unlocks.fillCharges  > 0,
+                         game.unlocks.fillCharges  > 1 ? `×${game.unlocks.fillCharges}`  : '');
+  updateButton('flip',   game.unlocks.flipCharges  > 0,
+                         game.unlocks.flipCharges  > 1 ? `×${game.unlocks.flipCharges}`  : '');
+  updateButton('whoops', game.unlocks.whoopsCharges > 0);
+  // Collapse the bar entirely when no consumables are visible — a
+  // brand-new run shouldn't show an empty toolbar taking up space at
+  // the top of the playfield.
+  const anyVisible = actionButtons$.some(b => !b.classList.contains('hidden'));
+  actionBar$.classList.toggle('is-empty', !anyVisible);
+  // Pause toggle in the top-right corner. Visible during an active
+  // run; the icon swaps between pause and play to reflect state.
+  const pauseShown = game.started && !game.gameOver;
+  pauseBtn$.classList.toggle('hidden',    !pauseShown);
+  pauseBtn$.classList.toggle('is-paused', game.paused);
+  pauseBtn$.setAttribute('aria-label', game.paused ? 'Resume' : 'Pause');
+}
+
+// Click dispatch — each handler is the touch equivalent of the
+// matching keyboard binding in input.js. Pause does the same
+// togglePause + show/hide-overlay dance the keyboard does so the
+// experience is symmetric across input methods.
+function dispatchAction(action) {
+  switch (action) {
+    case 'pause': {
+      if (game.gameOver || !game.started) return;
+      const wasPaused = game.paused;
+      game.togglePause();
+      if (wasPaused) { hideOverlay(); playTheme(); }
+      else           { showOverlay('PAUSED', 'TAP ▶ TO RESUME'); pauseTheme(); }
+      return;
+    }
+    case 'hold':   game.holdPiece();                          return;
+    case 'chisel': game._interceptInput('chisel:activate');   return;
+    case 'fill':   game._interceptInput('fill:activate');     return;
+    case 'flip':   game._interceptInput('flip:activate');     return;
+    case 'whoops': game._interceptInput('whoops');            return;
+  }
+}
+actionButtons$.forEach(btn => {
+  btn.addEventListener('click', () => dispatchAction(btn.dataset.action));
+});
+pauseBtn$.addEventListener('click', () => dispatchAction('pause'));
+
 // -------- Active-curse indicator --------
 // Renders a tag for each curse currently affecting gameplay, under
 // the score panel. Cheap enough to recompute every frame.
@@ -491,6 +564,12 @@ setupInput(game, {
   onPause:  () => { showOverlay('PAUSED', 'PRESS P TO RESUME'); pauseTheme(); },
   onResume: () => { hideOverlay(); playTheme(); },
 });
+
+// Touch gestures on the playfield — see js/touch.js for the gesture
+// vocabulary. Mouse / keyboard paths above are unaffected; touch.js
+// translates gestures to the same Game methods and `_interceptInput`
+// actions the desktop input layer uses.
+setupTouch(game, board$);
 
 // Play button on the splash screen — same start path as the first
 // keypress in input.js. Wrapped in a guard so a stray double-click
@@ -637,6 +716,7 @@ function frame(now) {
   syncChiselUI();
   syncBlessingsUI();
   syncCursesUI();
+  syncMobileButtons();
 
   // Game-over overlay (edge-triggered so we don't repaint every frame)
   if (game.gameOver && !prevGameOver) {
