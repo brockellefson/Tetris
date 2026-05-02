@@ -61,6 +61,15 @@ let heldDuringSwap = null;
 function captureSnapshot(game) {
   return {
     board:              game.board.map(row => row.slice()),
+    // Mirror of `board` for the special-block tags. Deep-copied so a
+    // later mutation can't alias the snapshot. The active piece's own
+    // `specials` field is intentionally NOT preserved — restore goes
+    // through spawnNext, which re-rolls decoratePiece, so the
+    // respawned piece may carry a different special (or none). That's
+    // by design: rewinding shouldn't lock in a known-good roll.
+    boardSpecials:      game.boardSpecials
+                          ? game.boardSpecials.map(row => row.slice())
+                          : null,
     // Pre-shift queue: prepend the just-spawned piece type so
     // restore + spawnNext() reproduces the exact same draw order.
     queue:              [game.current.type, ...game.queue],
@@ -142,6 +151,9 @@ export default {
     // capture; copy again on restore so later mutations don't alias
     // the snapshot.
     game.board              = s.board.map(row => row.slice());
+    if (s.boardSpecials) {
+      game.boardSpecials = s.boardSpecials.map(row => row.slice());
+    }
     game.queue              = s.queue.slice();
     game.hold               = s.hold;
     game.canHold            = s.canHold;

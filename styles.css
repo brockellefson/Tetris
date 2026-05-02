@@ -1150,6 +1150,31 @@ canvas { display: block; }
 }
 
 /* ============================================================
+   Unified arrow-key selection outline
+   ============================================================
+   Every focusable menu surface — the splash Play button, every
+   power-up card, every debug pill / mini-button / SET / CLOSE,
+   and the pause overlay's Debug button — gets the same crisp
+   white outline when the user navigates with the keyboard. We
+   key off `:focus-visible` instead of `:focus` so a plain mouse
+   click doesn't leave a sticky outline behind; the highlight is
+   reserved for keyboard-driven focus (Tab and arrow-key nav)
+   where the user genuinely needs to see "this is what's selected."
+   The white reads as an external selection ring rather than a
+   neon glow, which is exactly what makes it pop on top of the
+   themed cyan / pink / yellow neon underneath each button. */
+.menu-btn:focus-visible,
+.powerup-card:focus-visible,
+.debug-pill:focus-visible,
+.debug-mini-btn:focus-visible,
+.debug-action-btn:focus-visible,
+.debug-close-btn:focus-visible,
+#debug-btn:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* ============================================================
    Chisel power-up — board cursor + hint banner
    ============================================================ */
 #board-wrap.chiseling { cursor: crosshair; }

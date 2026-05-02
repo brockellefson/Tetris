@@ -20,20 +20,49 @@
 
 import { COLS, ROWS, BLOCK, COLORS } from './constants.js';
 import { PIECES, shapeOf } from './pieces.js';
+import { SPECIALS_BY_ID, specialAtPieceCell } from './specials/index.js';
+
+// ---- Rarity → visual treatment ----
+// Each rarity tier scales how much extra "weight" the special has
+// over its base color cycle. `glowMul` multiplies the special's own
+// `animation.glowBoost`, so the special file controls the baseline
+// and rarity controls the amplification. `pulse` adds a soft
+// breathing scale on top of the cycle (0 = static, 0.06 = +6%
+// peak-to-peak) — rarer = more dramatic.
+const RARITY_VFX = {
+  common:    { glowMul: 1.0, pulse: 0.00 },
+  uncommon:  { glowMul: 1.2, pulse: 0.02 },
+  rare:      { glowMul: 1.5, pulse: 0.04 },
+  legendary: { glowMul: 2.0, pulse: 0.06 },
+};
 
 // ---- color helpers ----
 // Used by drawBlock to build a vertical light→dark gradient over
 // the piece color, which is what gives blocks their 3D rounded feel.
+//
+// Accepts either "#rrggbb" or "rgb(r,g,b)" / "rgba(r,g,b,a)". The
+// rgb() form exists because the special-block renderer interpolates
+// between palette colors per frame — without this branch the rgb()
+// string would be sliced as if it were hex, parsed to NaN, and
+// blow up addColorStop downstream (taking the whole frame with it).
 const _rgbCache = new Map();
-function hexToRgb(hex) {
-  let v = _rgbCache.get(hex);
+function hexToRgb(color) {
+  let v = _rgbCache.get(color);
   if (v) return v;
-  v = [
-    parseInt(hex.slice(1, 3), 16),
-    parseInt(hex.slice(3, 5), 16),
-    parseInt(hex.slice(5, 7), 16),
-  ];
-  _rgbCache.set(hex, v);
+  if (color[0] === '#') {
+    v = [
+      parseInt(color.slice(1, 3), 16),
+      parseInt(color.slice(3, 5), 16),
+      parseInt(color.slice(5, 7), 16),
+    ];
+  } else {
+    // rgb(...) / rgba(...) — pull the first three integers.
+    const m = color.match(/\d+/g);
+    v = m && m.length >= 3
+      ? [parseInt(m[0], 10), parseInt(m[1], 10), parseInt(m[2], 10)]
+      : [0, 0, 0];
+  }
+  _rgbCache.set(color, v);
   return v;
 }
 function lighten(hex, amount) {
@@ -255,6 +284,96 @@ export function drawCell(ctx, x, y, color, ghost = false) {
   drawBlock(ctx, x * BLOCK, y * BLOCK, BLOCK, color, ghost);
 }
 
+// ============================================================
+// Special blocks
+// ============================================================
+//
+// Specials are painted with a cycling color drawn from the special's
+// palette (replacing the underlying piece color outright — the eye
+// should immediately read "this block is different"), plus an
+// amplified glow halo and an optional rarity-scaled pulse on the
+// scale.
+//
+// Sprite cache is intentionally bypassed: the color changes every
+// frame, so caching every variant would blow the cache and never
+// hit. There are at most ~5 special cells on screen at any given
+// time, so the slow path is fine.
+
+// Linear interpolation between two #rrggbb colors → another #rrggbb.
+// drawBlockRaw routes the result through lighten/darken/withAlpha,
+// every one of which calls back into hexToRgb — returning hex keeps
+// the gradient pipeline happy AND keeps the cache key short.
+function lerpColor(a, b, t) {
+  const [ar, ag, ab] = hexToRgb(a);
+  const [br, bg, bb] = hexToRgb(b);
+  const r  = Math.round(ar + (br - ar) * t);
+  const g  = Math.round(ag + (bg - ag) * t);
+  const bl = Math.round(ab + (bb - ab) * t);
+  return '#' +
+    r.toString(16).padStart(2, '0') +
+    g.toString(16).padStart(2, '0') +
+    bl.toString(16).padStart(2, '0');
+}
+
+// Pick the "current color" from a palette given a phase 0..1 cycling
+// at `speed` cycles per second. Wraps around so the cycle is seamless.
+//
+// `local` is quantized to PALETTE_LERP_STEPS so the per-frame color
+// lookup hits a bounded set of hex strings. Without this, every
+// frame produces a unique hex; the _rgbCache (and any consumer that
+// keys on color) would grow without bound during a long session.
+const PALETTE_LERP_STEPS = 24;
+function paletteAt(palette, timeMs, speed) {
+  if (palette.length === 1) return palette[0];
+  const phase = ((timeMs / 1000) * speed) % 1;            // 0..1
+  const idx   = Math.floor(phase * palette.length);
+  const localRaw = (phase * palette.length) - idx;        // 0..1 within slot
+  const local = Math.round(localRaw * PALETTE_LERP_STEPS) / PALETTE_LERP_STEPS;
+  const a = palette[idx];
+  const b = palette[(idx + 1) % palette.length];
+  return lerpColor(a, b, local);
+}
+
+// Paint one special block at pixel (px, py) of the requested size.
+// `def` is the special's full definition (palette, animation, rarity).
+// `timeMs` is a wallclock-style time source (performance.now() works).
+function drawSpecialBlock(ctx, px, py, size, def, timeMs) {
+  const vfx = RARITY_VFX[def.rarity] ?? RARITY_VFX.common;
+  const color = paletteAt(def.palette, timeMs, def.animation?.speed ?? 1);
+  const glowBoost = (def.animation?.glowBoost ?? 0) * vfx.glowMul;
+
+  // Optional pulse: scale the cell down a hair and re-center so the
+  // halo has room to breathe. Goes through the slow path either way.
+  const pulse = vfx.pulse > 0
+    ? 1 - vfx.pulse * (0.5 + 0.5 * Math.sin((timeMs / 1000) * Math.PI * 2 * (def.animation?.speed ?? 1)))
+    : 1;
+  const drawSize = size * pulse;
+  const drawPx = px + (size - drawSize) / 2;
+  const drawPy = py + (size - drawSize) / 2;
+
+  // Render the gem with the cycled color, then layer an extra halo
+  // ring on top so the special reads as "louder" than a normal cell.
+  drawBlockRaw(ctx, drawPx, drawPy, drawSize, color, false);
+  if (glowBoost > 0) {
+    ctx.save();
+    ctx.shadowColor = color;
+    ctx.shadowBlur  = Math.max(4, drawSize * (0.45 + glowBoost));
+    ctx.strokeStyle = withAlpha(color, 0.9);
+    ctx.lineWidth   = Math.max(1, drawSize * 0.06);
+    const inset  = Math.max(1, drawSize * 0.08);
+    const radius = Math.max(2, drawSize * 0.18);
+    ctx.beginPath();
+    ctx.roundRect(drawPx + inset, drawPy + inset, drawSize - inset * 2, drawSize - inset * 2, radius);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+// Cell-coords convenience for the board loop.
+function drawSpecialCell(ctx, x, y, def, timeMs) {
+  drawSpecialBlock(ctx, x * BLOCK, y * BLOCK, BLOCK, def, timeMs);
+}
+
 // Paint the main playfield: background, grid lines, locked blocks,
 // ghost outline, and active piece.
 export function drawBoard(ctx, canvas, game) {
@@ -267,10 +386,27 @@ export function drawBoard(ctx, canvas, game) {
   // rebuilt only when the column count changes.
   ctx.drawImage(getBgSprite(cols, ROWS), 0, 0);
 
-  // locked blocks
+  // Single time source for every animated overlay this frame so all
+  // specials cycle in phase with each other (and with future
+  // animation passes that want a stable per-frame clock).
+  const tNow = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
+  // locked blocks — dispatch to the special painter when boardSpecials
+  // tags the cell. Specials replace the underlying piece color; the
+  // standard sprite-cached path stays the hot path for everything else.
+  const specials = game.boardSpecials;
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < cols; c++) {
-      if (game.board[r][c]) drawCell(ctx, c, r, COLORS[game.board[r][c]]);
+      if (!game.board[r][c]) continue;
+      const tag = specials?.[r]?.[c];
+      if (tag) {
+        const def = SPECIALS_BY_ID[tag];
+        if (def) {
+          drawSpecialCell(ctx, c, r, def, tNow);
+          continue;
+        }
+      }
+      drawCell(ctx, c, r, COLORS[game.board[r][c]]);
     }
   }
 
@@ -322,13 +458,26 @@ export function drawBoard(ctx, canvas, game) {
     }
   }
 
-  // current (active) piece
+  // current (active) piece — same dispatch rule as the locked-block
+  // pass: if the mino at (r, c) carries a special, paint the cycled
+  // visual instead of the piece's base color. specialAtPieceCell does
+  // the rot-0 → current-rotation transform so the highlighted mino
+  // follows rotates and flips automatically.
   for (let r = 0; r < s.length; r++) {
     for (let c = 0; c < s[r].length; c++) {
       if (!s[r][c]) continue;
       const x = game.current.x + c;
       const y = game.current.y + r;
-      if (y >= 0) drawCell(ctx, x, y, COLORS[game.current.type]);
+      if (y < 0) continue;
+      const tag = specialAtPieceCell(game.current, r, c);
+      if (tag) {
+        const def = SPECIALS_BY_ID[tag];
+        if (def) {
+          drawSpecialCell(ctx, x, y, def, tNow);
+          continue;
+        }
+      }
+      drawCell(ctx, x, y, COLORS[game.current.type]);
     }
   }
 

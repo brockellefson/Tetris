@@ -124,3 +124,31 @@ export function shapeOf(piece) {
   if (piece.flipped) return mirrorShape(piece.type, piece.rot);
   return PIECES[piece.type][piece.rot];
 }
+
+// Map a (row, col) coordinate from a piece's rot-0 frame to its
+// current rotation + flip. Used by the special-blocks subsystem so a
+// special "tagged" to a specific mino at spawn (in rot-0 coords)
+// follows that mino through every rotate/flip without needing to
+// remap state every frame.
+//
+// Math: SRS rotates each PIECES matrix 90° clockwise around the
+// bounding-box center. For an n×n matrix that maps (r, c) → (c, n-1-r)
+// per rotation step. Flipping is the horizontal mirror (c → n-1-c)
+// applied AFTER rotation — which matches `shapeOf`'s order, where
+// the flipped path returns `mirrorShape(type, rot)` (rotate first,
+// then mirror the rows).
+//
+// Works uniformly for any piece since every PIECES matrix is square
+// (I = 4×4, O = 2×2, JLSTZT = 3×3).
+export function transformLocalCoord(piece, r0, c0) {
+  const n = PIECES[piece.type][0].length;
+  let r = r0, c = c0;
+  for (let i = 0; i < (piece.rot | 0); i++) {
+    const nr = c;
+    const nc = n - 1 - r;
+    r = nr;
+    c = nc;
+  }
+  if (piece.flipped) c = n - 1 - c;
+  return { r, c };
+}

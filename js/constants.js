@@ -112,10 +112,40 @@ export const MAX_WHOOPS_CHARGES = 1;
 // can extend the window indefinitely. Hard drops bypass this entirely.
 export const LOCK_DELAY = 500;
 
-// Gravity power-up — milliseconds between each "fall step" while the
-// gravity blessing is processing. Each step shifts every floating
-// locked block down by one cell, so smaller values look snappier and
-// larger values let the player follow the cascade. Tuned for a slow,
-// dramatic "rain" cadence — the player should feel each block thud
-// down rather than see the board snap into place.
+// Gravity cascade — milliseconds between each "fall step" while a
+// gravity-cascade is processing (today triggered only by the Gravity
+// special block). Each step shifts every floating locked block down
+// by one cell, so smaller values look snappier and larger values let
+// the player follow the cascade. Tuned for a slow, dramatic "rain"
+// cadence — the player should feel each block thud down rather than
+// see the board snap into place.
 export const GRAVITY_POWER_STEP = 120;
+
+// Special blocks — odds that a freshly spawned piece carries a
+// special-tagged mino. The base chance is what level 1 sees; every
+// level adds PER_LEVEL_BONUS (capped at MAX_CHANCE) so a roguelite
+// run feels increasingly chaotic as the player climbs. The roll
+// happens once at spawn time in js/specials/index.js. Setting BASE
+// to 0 with PER_LEVEL_BONUS = 0 disables specials entirely; setting
+// MAX_CHANCE to 1 lets late-game pieces always carry one.
+//
+// Effective chance at level L:
+//   min(MAX, BASE + (L - 1) * PER_LEVEL_BONUS)
+//
+// The current curve: 5% at L1, 10% at L6, 15% at L11, 20% at L16
+// and beyond (clamped).
+export const SPECIAL_BLOCK_BASE_CHANCE      = 0.05;
+export const SPECIAL_BLOCK_PER_LEVEL_BONUS  = 0.01;
+export const SPECIAL_BLOCK_MAX_CHANCE       = 0.20;
+
+// Rarity tiers for special blocks. Each special declares one of these
+// strings; the picker reads the weight, the renderer reads it again
+// to scale the visual treatment (rarer = louder glow + a soft pulse
+// on top of the palette cycle). Adding a new tier is a one-line
+// edit here plus an entry in render.js's RARITY_VFX table.
+export const SPECIAL_RARITY_WEIGHTS = {
+  common:    8,
+  uncommon:  4,
+  rare:      2,
+  legendary: 1,
+};

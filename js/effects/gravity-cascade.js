@@ -1,24 +1,32 @@
-// Power-up: Gravity — one-shot board compaction. Picking the card
-// pauses the active piece, then makes every locked block fall into
-// any empty space below it. When the cascade settles, full rows are
-// cleared (with the standard line-clear animation, score, and
-// combo / B2B / perfect-clear bonuses). The fall-then-clear loop
-// repeats until no more blocks can fall and no more lines complete,
-// at which point the active piece is restored and play resumes.
+// ============================================================
+// Gravity cascade — pure board-compaction engine
+// ============================================================
 //
-// This module exports a single object with two roles:
+// A one-shot sequence that pauses the active piece, makes every
+// locked block fall into any empty space below it, clears any rows
+// completed by the cascade (with the standard line-clear animation,
+// score, B2B / combo / perfect-clear bonuses), and loops until the
+// board settles.
 //
-//   1. Power-up card (id, name, description, available, apply) —
-//      consumed by the choice-menu / power-up registry. apply() kicks
-//      off the cascade by calling startGravity (below) — the plugin
-//      itself drives the per-frame logic from there.
+// This module used to be the Gravity power-up. It's been extracted
+// into a plain "effect" because the trigger source is no longer the
+// power-up menu — today it's the Gravity special block (see
+// js/specials/gravity.js) and the debug menu. Decoupling the engine
+// from any specific card lets future triggers (a curse? a key
+// combo? a chain reaction from another special?) call into the same
+// cascade without touching this file.
 //
-//   2. Lifecycle plugin (freezesGameplay, tick) — registered on the
-//      Game in main.js. The state slot (`game.gravity = { active,
-//      savedPiece, phase, stepTimer }`) stays on Game for the
-//      renderer's benefit (it hides `current` while active so locked
-//      blocks don't visually pass through the parked piece), but
-//      every mutation flows through this file.
+// Public surface:
+//   startGravityCascade(game)   kick off a cascade — idempotent (refuses
+//                               if one is already running)
+//   default export              plugin object — register from main.js
+//                               so freezesGameplay / tick fire each frame
+//
+// The state slot (`game.gravity = { active, savedPiece, phase,
+// stepTimer }`) lives on Game so the renderer can read it (it hides
+// `current` while active so falling locked blocks don't visually
+// pass through the parked piece). All mutations flow through this
+// file.
 //
 // Phases (driven by `game.gravity.phase`):
 //   'fall'      — accumulate dt; each GRAVITY_POWER_STEP ms run one
@@ -31,7 +39,7 @@
 //                 duration elapses, run a gravity-flavored clear
 //                 (standard scoring + milestone awards, but DON'T
 //                 spawn a new piece — the cascade owns the active-
-//                 piece slot until endGravity).
+//                 piece slot until endCascade).
 
 import {
   CLEAR_DURATION,
@@ -48,7 +56,7 @@ import { collides, findFullRows, removeRows } from '../board.js';
 // `gravity.savedPiece` and `current` is cleared so the renderer hides
 // it for the duration (otherwise falling locked blocks would visually
 // pass through the piece's silhouette).
-function startCascade(game) {
+export function startGravityCascade(game) {
   if (game.gravity.active) return;
   game.gravity.active     = true;
   game.gravity.savedPiece = game.current;
@@ -71,15 +79,24 @@ function startCascade(game) {
 // the bottommost floating block falls per call. That gives the
 // cascade its visible "rain" cadence; without it the board would
 // resolve in a single frame.
+//
+// Critically, this also moves any matching cell in `boardSpecials` so
+// special-tagged blocks fall in lock-step with their underlying cell
+// — otherwise a falling block would shed its special on takeoff.
 function fallStep(game) {
   const rows = game.board.length;
   const cols = game.board[0]?.length ?? 10;
+  const specials = game.boardSpecials;
   let moved = false;
   for (let r = rows - 2; r >= 0; r--) {
     for (let c = 0; c < cols; c++) {
       if (game.board[r][c] && !game.board[r + 1][c]) {
         game.board[r + 1][c] = game.board[r][c];
         game.board[r][c]     = null;
+        if (specials) {
+          specials[r + 1][c] = specials[r][c];
+          specials[r][c]     = null;
+        }
         moved = true;
       }
     }
@@ -93,8 +110,18 @@ function fallStep(game) {
 // restored at the end of the whole cascade by endCascade(), not after
 // every clear. After scoring, we loop back into the 'fall' phase to
 // see if the cleared rows expose more floating blocks that can drop.
+//
+// The beforeClear → removeRows → onClear hook order matches Game's
+// standard completeClear so the specials plugin (which captures
+// triggers in beforeClear and fires them in onClear) sees a
+// gravity-driven clear identically to a player-driven one. That's
+// what gives chained-special detonations their natural recursion:
+// a Gravity special clearing a row that contains another Gravity
+// special re-enters this engine through the second special's
+// onTrigger, and the new cascade picks up where this one left off.
 function completeCascadeClear(game) {
   const cleared = game.clearingRows.length;
+  game._notifyPlugins('beforeClear', game.clearingRows);
   removeRows(game.board, game.clearingRows);
 
   const wasB2B = (cleared === 4 && game.lastClearWasTetris);
@@ -125,10 +152,7 @@ function completeCascadeClear(game) {
     game.firstClearAwarded = true;
     milestonesEarned += 1;
   }
-  if (milestonesEarned > 0) {
-    game.pendingChoices += milestonesEarned;
-    game.onPowerUpChoice?.(game.pendingChoices);
-  }
+  game.pendingChoices += milestonesEarned;
 
   if (perfect)         game.onPerfectClear?.();
   if (cleared === 4)   game.onTetris?.(wasB2B);
@@ -138,13 +162,35 @@ function completeCascadeClear(game) {
   game.clearTimer = 0;
   game.gravity.phase     = 'fall';
   game.gravity.stepTimer = 0;
+  // Specials' onClear fires their triggers BEFORE the power-up menu
+  // callback so any freezing plugin they start gets a chance to flip
+  // its gate first — same ordering rule completeClear() uses. A
+  // Gravity special on a row this cascade just cleared calls back
+  // into startGravityCascade, which is idempotent (we're still
+  // inside an active cascade so the call no-ops). Future special
+  // kinds (bombs, etc.) can fire freely without recursing into this
+  // engine.
+  game._notifyPlugins('onClear', cleared);
+  if (milestonesEarned > 0) {
+    game.onPowerUpChoice?.(game.pendingChoices);
+  }
 }
 
-// Wrap up the cascade and hand control back to the player. Restores
-// the saved piece into `current`. If the (extremely unlikely)
-// restoration overlaps a block — e.g. a clever Fill / Junk-row
-// interaction shifted blocks under the parked piece — we end the
-// run, mirroring the standard spawn-collision rule.
+// Wrap up the cascade and hand control back to the player. Two
+// resume paths:
+//
+//   savedPiece set       The cascade was triggered while a piece was
+//                        in flight (chisel'd a Gravity special, or
+//                        the debug menu kicked it). Restore the
+//                        parked piece. A spawn-overlap from board
+//                        shuffling counts as a legitimate game over.
+//
+//   savedPiece null      The cascade was triggered from a line clear
+//                        (the piece had already been locked + nulled
+//                        by lockCurrent). There's no parked piece to
+//                        restore — pull the next one from the queue.
+//                        completeClear deferred its own spawnNext to
+//                        let us own the resume here.
 function endCascade(game) {
   game.gravity.active = false;
   if (game.gravity.savedPiece) {
@@ -159,18 +205,28 @@ function endCascade(game) {
   // Reset gravity-drop accumulator so the restored piece doesn't
   // immediately fall a row from leftover dt collected pre-cascade.
   game.dropTimer = 0;
+  // No parked piece to restore AND nothing currently active → the
+  // cascade was triggered mid-clear. Pull the next piece from the
+  // queue ourselves. spawnNext is the standard chokepoint, so all
+  // the usual decoratePiece / onSpawn hooks fire on the new piece.
+  if (!game.current && !game.gameOver) {
+    game.spawnNext();
+  }
   // Lets main.js re-open any choice menu deferred by the cascade.
   game.onGravityComplete?.();
 }
 
+// The plugin object — wires the engine into Game's lifecycle bus.
+// Identity is stable across hot-reloads / test resets so registering
+// twice is a no-op (Game just appends, but the second registration
+// would double-tick the cascade).
 export default {
-  id: 'gravity',
-  name: 'Gravity',
-  description: 'All blocks fall to fill empty space below, clearing any lines they form.',
-  available: () => true,
-  apply: (game) => { startCascade(game); },
-
-  // ---- lifecycle hooks ----
+  // Reset module-bound state on every Game.reset(). The state slot
+  // itself lives on Game, but if the player restarts mid-cascade the
+  // savedPiece reference would otherwise be silently dropped into
+  // garbage. Game.reset() reinitializes game.gravity wholesale, so
+  // this hook is only needed if we later add module-scoped state.
+  reset() {},
 
   freezesGameplay: (game) => game.gravity.active,
 

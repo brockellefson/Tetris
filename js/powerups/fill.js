@@ -36,6 +36,9 @@
 //   'cursor:left' / 'right' /
 //     'up'   / 'down'             Arrow / WASD, only when fill.active
 //   'cursor:confirm'              Enter / Space, only when fill.active
+//   'cursor:cancel'               Esc, only when fill.active —
+//                                 refunds the charge and resumes the
+//                                 menu queue
 //   'boardClick' (col, row)       Mouse / tap, only when fill.active
 
 import { FILL_DURATION, MAX_FILL_CHARGES } from '../constants.js';
@@ -172,6 +175,18 @@ export default {
       case 'cursor:confirm':
         if (!game.fill.active || !game.fill.cursor) return false;
         return selectCell(game, game.fill.cursor.x, game.fill.cursor.y);
+      case 'cursor:cancel':
+        // Bail out of an active pick. Symmetric with activate(): we
+        // refund the charge that activate() decremented, drop the
+        // active/cursor state, and notify main.js that the menu
+        // queue can resume (a fill earned mid-clear may have a
+        // power-up choice waiting behind it).
+        if (!game.fill.active) return false;
+        game.unlocks.fillCharges += 1;
+        game.fill.active = false;
+        game.fill.cursor = null;
+        game.onFillComplete?.();
+        return true;
       case 'boardClick': {
         if (!game.fill.active) return false;
         const [col, row] = args;

@@ -35,9 +35,10 @@ export class Game {
   // -------- Plugin system --------
   //
   // Lifecycle hooks for self-contained gameplay extensions (Slick,
-  // Whoops, Chisel, Fill, Gravity). Each plugin is a plain object with
-  // any subset of the hook fields below. Game calls into them at fixed
-  // dispatch points and otherwise stays ignorant of their existence.
+  // Whoops, Chisel, Fill, Gravity cascade, Specials). Each plugin is
+  // a plain object with any subset of the hook fields below. Game
+  // calls into them at fixed dispatch points and otherwise stays
+  // ignorant of their existence.
   //
   // Hook contract — every hook receives `game` as the first arg.
   //   init(game)             once on registerPlugin()
@@ -54,9 +55,22 @@ export class Game {
   //                          piece. Whoops uses this to snapshot.
   //   onLock(game)           at the top of lockCurrent(), before the
   //                          board mutation. Whoops promotes the
-  //                          pre-spawn snapshot here.
+  //                          pre-spawn snapshot here. Specials writes
+  //                          piece-bound special tags onto boardSpecials.
+  //   beforeClear(game, rows)
+  //                          inside completeClear() and the gravity
+  //                          cascade's completeCascadeClear(),
+  //                          immediately before removeRows runs, with
+  //                          the indices of the rows about to vanish.
+  //                          Specials uses this to capture triggers
+  //                          and shift its parallel grid.
   //   onClear(game, cleared) at the end of completeClear(), after
-  //                          score/level have been updated.
+  //                          score/level have been updated. Specials
+  //                          fires the captured triggers here.
+  //   onCellRemoved(game, x, y, source)
+  //                          fired by single-cell removers (chisel today)
+  //                          AFTER they null the board cell. Specials
+  //                          fires the cell's trigger if it had one.
   //   onPlayerAdjustment(game, kind)
   //                          fires for any successful move / rotate /
   //                          flip. Slick uses this for its step-reset.
@@ -75,6 +89,11 @@ export class Game {
   //                          (used by Chisel/Fill/Whoops to handle
   //                          their A / S / W keys without Game needing
   //                          per-power-up tryActivate* methods).
+  //   decoratePiece(game, piece) -> piece
+  //                          modifier hook (threaded via _reduceHookValue),
+  //                          fired inside spawnNext() between spawn(type)
+  //                          and the assignment to game.current. Specials
+  //                          uses this to possibly attach a tagged mino.
 
   registerPlugin(plugin) {
     this._plugins.push(plugin);
@@ -140,6 +159,12 @@ export class Game {
 
   reset() {
     this.board       = newBoard();
+    // Parallel-to-board grid storing the special-block tag for each
+    // cell, or null. Owned by the specials subsystem (js/specials/),
+    // but lives on Game so the renderer / Whoops snapshot can read
+    // it directly. Reinitialized here so a restart clears stale tags
+    // even before the specials plugin's reset() runs.
+    this.boardSpecials = newBoard();
     this.queue       = [];
     this.hold        = null;
     this.canHold     = true;
@@ -300,7 +325,8 @@ export class Game {
   //   fill cursor/pick   → js/powerups/fill.js    ('cursor:*' / 'boardClick')
   //   tryActivateFlip    → js/powerups/flip.js    ('flip:activate')
   //   tryActivateWhoops  → js/powerups/whoops.js  ('whoops')
-  //   gravity cascade    → js/powerups/gravity.js (apply + tick + freezesGameplay)
+  //   gravity cascade    → js/effects/gravity-cascade.js (tick + freezesGameplay,
+  //                        triggered by js/specials/gravity.js or debug menu)
   //   slick lock-delay   → js/powerups/slick.js   (tick + shouldDeferLock)
   //   addColumn/tryRemoveColumn → js/curses/growth.js (apply / 'growth:removeColumn')
   //   addJunkRow/addJunkBatch   → js/curses/junk.js   (apply)
@@ -413,7 +439,11 @@ export class Game {
   spawnNext() {
     this.refillQueue();
     const type = this.queue.shift();
-    this.current = spawn(type);
+    // Plugins can decorate the freshly-spawned piece via decoratePiece
+    // — Specials uses this to possibly tag one mino. The hook is a
+    // modifier (returns the new piece), threaded through every
+    // registered plugin in registration order.
+    this.current = this._reduceHookValue('decoratePiece', spawn(type));
     this.canHold = true;
     // If the new piece spawns into a filled cell, the game is over.
     if (collides(this.board, this.current)) {
@@ -538,6 +568,13 @@ export class Game {
   // Called from tick() once the clear animation finishes.
   completeClear() {
     const cleared = this.clearingRows.length;
+    // Plugin hook — fires BEFORE removeRows mutates the board, with
+    // the about-to-vanish row indices. Specials uses this to capture
+    // the kind/coords of every special-bearing cell on those rows
+    // (and shift its parallel grid in lock-step) before the data is
+    // gone. Triggers themselves fire from the onClear hook below,
+    // after scoring is finalized.
+    this._notifyPlugins('beforeClear', this.clearingRows);
     removeRows(this.board, this.clearingRows);
 
     // Capture the B2B flag before we mutate state — needed for both the
@@ -584,10 +621,7 @@ export class Game {
       this.firstClearAwarded = true;
       milestonesEarned += 1;
     }
-    if (milestonesEarned > 0) {
-      this.pendingChoices += milestonesEarned;
-      this.onPowerUpChoice?.(this.pendingChoices);
-    }
+    this.pendingChoices += milestonesEarned;
 
     // Visual / FX hooks — fired in importance order so the notification
     // stack reads top-to-bottom: PERFECT > TETRIS/B2B > COMBO.
@@ -597,17 +631,47 @@ export class Game {
 
     this.clearingRows = [];
     this.clearTimer = 0;
-    // Plugin hook — fires after scoring is fully applied. Gravity uses
-    // this to loop back into another fall step; Fill uses it to know
-    // a fill-triggered clear has wrapped up.
+    // Plugin hook — fires after scoring is fully applied. Specials
+    // fires its captured triggers here (e.g. a Gravity special on a
+    // cleared row kicks off a cascade). Fill uses it to know a fill-
+    // triggered clear has wrapped up.
+    //
+    // Triggers fire BEFORE the power-up menu callback below so any
+    // freezing plugin they start (Gravity cascade today, future
+    // freezing specials tomorrow) flips its `freezesGameplay` true
+    // synchronously, and the menu's gate (showNext in
+    // menus/powerup.js) defers cleanly. Without this ordering, the
+    // menu would surface on top of a still-running cascade.
     this._notifyPlugins('onClear', cleared);
-    // If this clear was triggered by Fill (rather than a piece lock),
-    // the player still has an active piece on screen — we stashed it in
-    // fill.savedPiece in fillComplete(). Restore it instead of
-    // spawning a fresh one. If the saved piece happens to overlap a
-    // block left behind in a non-cleared row, that's a legitimate game
-    // over (same rule as spawn-collision elsewhere).
-    if (this.fill.savedPiece) {
+
+    // Power-up menu callback — fires AFTER triggers so the gate has
+    // a settled view of whether any plugin is freezing gameplay. The
+    // pendingChoices counter itself was bumped above; the callback
+    // here is purely the "open the menu" signal.
+    if (milestonesEarned > 0) {
+      this.onPowerUpChoice?.(this.pendingChoices);
+    }
+
+    // Spawn handling. Three branches:
+    //
+    //   Cascade triggered by onClear above
+    //     A special (Gravity today) flipped the cascade on. The
+    //     cascade owns the active-piece slot for its duration; deferring
+    //     spawnNext to endCascade keeps a fresh piece from appearing on
+    //     top of the falling locked blocks. The cascade's savedPiece is
+    //     null in this path (current was already null when the clear
+    //     started), so endCascade falls through to spawnNext itself.
+    //
+    //   Fill-triggered clear (no cascade)
+    //     The player's active piece was stashed in fill.savedPiece by
+    //     fillComplete(); restore it instead of pulling a fresh one.
+    //     A spawn collision here is a legitimate game over.
+    //
+    //   Standard clear
+    //     Pull the next piece from the queue.
+    if (this.gravity?.active) {
+      // endCascade will spawnNext when no parked piece is restorable.
+    } else if (this.fill.savedPiece) {
       this.current = this.fill.savedPiece;
       this.fill.savedPiece = null;
       if (collides(this.board, this.current)) this.gameOver = true;

@@ -555,6 +555,330 @@ export function wireMenuSounds(el, {
   }
 }
 
+// Bright "shimmer-pop" played when a special block is triggered (line
+// clear, chisel — anything that fires the special's onTrigger). The
+// cue has to read as "something powerful just went off" without
+// stepping on the line-clear chord that's also playing in the
+// line-clear path. Three voices stacked:
+//
+//   1. A fast upward arpeggio in C-major pentatonic (G5 → C6 → E6),
+//      sitting an octave above the playClearSound's top note so it
+//      cuts through the chord rather than blurring with it.
+//   2. A high bandpassed-noise sparkle that fades fast — adds the
+//      "magic dust" texture without ringing out long enough to mask
+//      the cascade footsteps that follow for Gravity.
+//   3. A short sub-bass pulse for weight (E2 → E1) so chiseling a
+//      special block has a satisfying low-end thump alongside the
+//      regular chisel "crack."
+//
+// Pentatonic notes keep this consonant with everything else in the
+// game's audio palette — a cascade triggered mid-clear stacks
+// shimmer-pop on top of clear-chord on top of cascade-tick without
+// any dissonance.
+export function playSpecialTriggerSound() {
+  const ac = getCtx();
+  const now = ac.currentTime;
+  const dur = 0.55;
+
+  // Master envelope — fast attack so the trigger feels instant,
+  // moderate tail so the shimmer rings just past the visual flash.
+  const env = ac.createGain();
+  env.gain.setValueAtTime(0, now);
+  env.gain.linearRampToValueAtTime(0.13, now + 0.01);
+  env.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+  const lpf = ac.createBiquadFilter();
+  lpf.type = 'lowpass';
+  // Sweep brighter on the swell — same "opening up" trick the menu-
+  // open chime uses, scaled for a punchier transient.
+  lpf.frequency.setValueAtTime(2400, now);
+  lpf.frequency.exponentialRampToValueAtTime(6000, now + 0.18);
+  lpf.Q.value = 0.7;
+  lpf.connect(env);
+  env.connect(ac.destination);
+
+  // ----- Voice 1: ascending pentatonic arpeggio -----
+  // G5 → C6 → E6. The detuned sine pair per note gives the same
+  // chorus shimmer the clear sound has, so the two cues feel like
+  // they belong together.
+  const notes = [
+    { freq: 783.99,  t: 0.00 },  // G5
+    { freq: 1046.50, t: 0.05 },  // C6
+    { freq: 1318.51, t: 0.10 },  // E6
+  ];
+  for (const { freq, t } of notes) {
+    const osc1 = ac.createOscillator();
+    osc1.type = 'sine';
+    osc1.frequency.value = freq;
+    osc1.connect(lpf);
+
+    const osc2 = ac.createOscillator();
+    osc2.type = 'sine';
+    osc2.frequency.value = freq * 1.005;
+    const detune = ac.createGain();
+    detune.gain.value = 0.5;
+    osc2.connect(detune);
+    detune.connect(lpf);
+
+    osc1.start(now + t);
+    osc2.start(now + t);
+    osc1.stop(now + t + 0.45);
+    osc2.stop(now + t + 0.45);
+  }
+
+  // ----- Voice 2: high sparkle (bandpassed noise) -----
+  // Short noise burst centered around 5 kHz — the "magic dust" layer.
+  // Fades faster than the arpeggio so the tail is melodic, not hissy.
+  const noiseBuf = ac.createBuffer(1, Math.floor(ac.sampleRate * 0.3), ac.sampleRate);
+  const data = noiseBuf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const noise = ac.createBufferSource();
+  noise.buffer = noiseBuf;
+
+  const noiseBP = ac.createBiquadFilter();
+  noiseBP.type = 'bandpass';
+  noiseBP.frequency.value = 5000;
+  noiseBP.Q.value = 1.4;
+
+  const noiseEnv = ac.createGain();
+  noiseEnv.gain.setValueAtTime(0.08, now);
+  noiseEnv.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+
+  noise.connect(noiseBP);
+  noiseBP.connect(noiseEnv);
+  noiseEnv.connect(ac.destination);
+
+  // ----- Voice 3: sub-bass pulse -----
+  // Quick E2 → E1 thump on its own envelope so the rest of the cue
+  // can stay bright without the lows muddying the master gain.
+  const subEnv = ac.createGain();
+  subEnv.gain.setValueAtTime(0, now);
+  subEnv.gain.linearRampToValueAtTime(0.14, now + 0.01);
+  subEnv.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+
+  const sub = ac.createOscillator();
+  sub.type = 'sine';
+  sub.frequency.setValueAtTime(82.41, now);          // E2
+  sub.frequency.exponentialRampToValueAtTime(41.20, now + 0.16);  // E1
+  sub.connect(subEnv);
+  subEnv.connect(ac.destination);
+
+  noise.start(now);
+  noise.stop(now + 0.3);
+  sub.start(now);
+  sub.stop(now + 0.25);
+}
+
+// Sharp "electric jolt" played when a piece carrying a special block
+// spawns onto the board. The cue has to read as "ALERT, this one is
+// different" without being so loud it competes with the lock chord
+// the player will hear ~1 second later. Three layers:
+//
+//   1. A bandpassed-noise crackle (5 kHz center, ~50 ms) — the spark.
+//      Hard transient, no swell, mimics the snap of a static discharge.
+//   2. A square-wave "arc" that flickers between two close pitches
+//      (G6 ⇄ A6) over 90 ms via setValueAtTime steps. The fast
+//      alternation is what reads as electricity arcing rather than
+//      just a tone.
+//   3. A high pure-sine ring (C7) on a fast decay — the after-tone
+//      that makes the cue feel "magical" rather than purely electrical.
+//      Pentatonic-family note so it harmonizes with everything else.
+//
+// Total duration ~200 ms — short enough that rapid spawns (debug
+// menu spam, an unlucky run of three specials in a row) don't pile
+// into a buzz.
+export function playSpecialSpawnSound() {
+  const ac = getCtx();
+  const now = ac.currentTime;
+
+  // ----- Voice 1: bandpassed noise crackle (the spark) -----
+  const noiseDur = 0.05;
+  const noiseBuf = ac.createBuffer(1, Math.floor(ac.sampleRate * noiseDur), ac.sampleRate);
+  const data = noiseBuf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const noise = ac.createBufferSource();
+  noise.buffer = noiseBuf;
+
+  const noiseBP = ac.createBiquadFilter();
+  noiseBP.type = 'bandpass';
+  noiseBP.frequency.value = 5000;
+  noiseBP.Q.value = 2.0;
+
+  const noiseEnv = ac.createGain();
+  noiseEnv.gain.setValueAtTime(0.18, now);
+  noiseEnv.gain.exponentialRampToValueAtTime(0.001, now + noiseDur);
+
+  noise.connect(noiseBP);
+  noiseBP.connect(noiseEnv);
+  noiseEnv.connect(ac.destination);
+
+  // ----- Voice 2: arcing square wave (the electric flicker) -----
+  // Step the frequency between G6 and A6 every 15 ms — the rapid
+  // alternation is what gives the cue its "electricity arcing" feel.
+  // Square wave's harsh harmonics are what sells the electrical
+  // quality (vs. the soft sines used elsewhere).
+  const arc = ac.createOscillator();
+  arc.type = 'square';
+  const f1 = 1567.98; // G6
+  const f2 = 1760.00; // A6
+  for (let t = 0; t < 0.09; t += 0.015) {
+    arc.frequency.setValueAtTime((Math.floor(t / 0.015) % 2) ? f2 : f1, now + t);
+  }
+
+  // Bandpass tames the square's harshness — keeps the buzz from being
+  // grating without losing the harmonic richness that makes it read
+  // as electrical.
+  const arcBP = ac.createBiquadFilter();
+  arcBP.type = 'bandpass';
+  arcBP.frequency.value = 2400;
+  arcBP.Q.value = 1.8;
+
+  const arcEnv = ac.createGain();
+  arcEnv.gain.setValueAtTime(0, now);
+  arcEnv.gain.linearRampToValueAtTime(0.10, now + 0.005);
+  arcEnv.gain.exponentialRampToValueAtTime(0.001, now + 0.10);
+
+  arc.connect(arcBP);
+  arcBP.connect(arcEnv);
+  arcEnv.connect(ac.destination);
+
+  // ----- Voice 3: high sine ring (the after-shimmer) -----
+  // C7 sine that lands as the arc dies, fades fast. Brings the cue
+  // back into the game's pentatonic palette so the electrical layer
+  // doesn't sound out of place against the soft synth tones around it.
+  const ring = ac.createOscillator();
+  ring.type = 'sine';
+  ring.frequency.value = 2093.00; // C7
+
+  const ringEnv = ac.createGain();
+  ringEnv.gain.setValueAtTime(0, now + 0.06);
+  ringEnv.gain.linearRampToValueAtTime(0.08, now + 0.07);
+  ringEnv.gain.exponentialRampToValueAtTime(0.001, now + 0.20);
+
+  ring.connect(ringEnv);
+  ringEnv.connect(ac.destination);
+
+  noise.start(now);
+  noise.stop(now + noiseDur);
+  arc.start(now);
+  arc.stop(now + 0.11);
+  ring.start(now + 0.06);
+  ring.stop(now + 0.22);
+}
+
+// "Suction" cue played when the Gravity special block triggers. The
+// brief feels like the entire board is being inhaled toward a
+// singularity — three layers do the work:
+//
+//   1. Overlapping sine sweeps that all start HIGH and resolve LOW.
+//      Three voices entering on staggered onsets at different starting
+//      pitches (1600 → 1100 → 700 Hz) all converge to E1, which the
+//      ear reads as "many particles falling inward toward one point."
+//      Downward exponential sweeps are what give the cue its pull.
+//   2. A bandpassed-noise wash whose center frequency sweeps from
+//      bright (5 kHz) DOWN to muffled (200 Hz) — the high frequencies
+//      "getting swallowed" past the listener's ear is what makes it
+//      sound like the noise itself is being absorbed.
+//   3. A short low-bass impact at the end (E1 thump, ~80 ms decay) —
+//      the moment everything arrives at the bottom and slams home.
+//
+// Notes are picked from the same pentatonic family the rest of the
+// game uses (E1 / E2 are octaves of E4 in C-major-pentatonic), so the
+// cue stays in the synthwave palette even though it's bass-heavy.
+export function playGravitySuckSound() {
+  const ac = getCtx();
+  const now = ac.currentTime;
+  const dur = 0.55;
+
+  // Master envelope — slow swell IN, then a sharp peak at the impact,
+  // then quick decay. The slow attack is critical: a fast attack would
+  // sound like a hit, but suction is an in-drawn pull, so the gain
+  // ramps in over the same interval the pitch sweeps are descending.
+  const env = ac.createGain();
+  env.gain.setValueAtTime(0, now);
+  env.gain.linearRampToValueAtTime(0.16, now + 0.32);    // build up
+  env.gain.linearRampToValueAtTime(0.20, now + 0.36);    // peak at impact
+  env.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+  // ----- Voice 1: converging sine sweeps -----
+  // Three voices, staggered onset, different starting pitches, all
+  // sweeping DOWN to E1 (~41 Hz). Listen to them and you hear a swarm
+  // collapsing into a point.
+  const lpf = ac.createBiquadFilter();
+  lpf.type = 'lowpass';
+  // Filter also closes as the sweep progresses — high partials drop
+  // out faster than the fundamentals, which sells the "sucked away"
+  // feeling for the higher voices.
+  lpf.frequency.setValueAtTime(4000, now);
+  lpf.frequency.exponentialRampToValueAtTime(400, now + 0.36);
+  lpf.Q.value = 0.7;
+  lpf.connect(env);
+  env.connect(ac.destination);
+
+  const sweeps = [
+    { startFreq: 1600, t: 0.00, sweepDur: 0.34 },
+    { startFreq: 1100, t: 0.04, sweepDur: 0.30 },
+    { startFreq:  700, t: 0.08, sweepDur: 0.26 },
+  ];
+  const targetFreq = 41.20; // E1
+  for (const { startFreq, t, sweepDur } of sweeps) {
+    const osc = ac.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(startFreq, now + t);
+    osc.frequency.exponentialRampToValueAtTime(targetFreq, now + t + sweepDur);
+    osc.connect(lpf);
+    osc.start(now + t);
+    osc.stop(now + t + sweepDur + 0.05);
+  }
+
+  // ----- Voice 2: noise wash with closing bandpass -----
+  // White noise through a bandpass whose center sweeps from 5 kHz to
+  // 200 Hz over the inhale. The high frequencies vanishing first is
+  // what gives the cue its "being absorbed past the listener" quality.
+  const noiseBuf = ac.createBuffer(1, Math.floor(ac.sampleRate * 0.45), ac.sampleRate);
+  const data = noiseBuf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const noise = ac.createBufferSource();
+  noise.buffer = noiseBuf;
+
+  const noiseBP = ac.createBiquadFilter();
+  noiseBP.type = 'bandpass';
+  noiseBP.frequency.setValueAtTime(5000, now);
+  noiseBP.frequency.exponentialRampToValueAtTime(200, now + 0.36);
+  noiseBP.Q.value = 1.6;
+
+  const noiseEnv = ac.createGain();
+  noiseEnv.gain.setValueAtTime(0, now);
+  noiseEnv.gain.linearRampToValueAtTime(0.10, now + 0.20);
+  noiseEnv.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+
+  noise.connect(noiseBP);
+  noiseBP.connect(noiseEnv);
+  noiseEnv.connect(ac.destination);
+
+  // ----- Voice 3: low-bass impact at the bottom -----
+  // The moment of arrival — a quick E1 thump that lands AS the sweeps
+  // resolve, so the ear reads "they got there." Stays out of the way
+  // of any cascade footsteps that follow because it's fully decayed
+  // before the cascade's first fall step (GRAVITY_POWER_STEP = 120 ms).
+  const impactEnv = ac.createGain();
+  impactEnv.gain.setValueAtTime(0, now + 0.32);
+  impactEnv.gain.linearRampToValueAtTime(0.18, now + 0.34);
+  impactEnv.gain.exponentialRampToValueAtTime(0.001, now + 0.50);
+
+  const impact = ac.createOscillator();
+  impact.type = 'sine';
+  impact.frequency.setValueAtTime(82.41, now + 0.32);          // E2
+  impact.frequency.exponentialRampToValueAtTime(41.20, now + 0.42); // E1
+  impact.connect(impactEnv);
+  impactEnv.connect(ac.destination);
+
+  noise.start(now);
+  noise.stop(now + 0.45);
+  impact.start(now + 0.32);
+  impact.stop(now + 0.50);
+}
+
 // Soft low "thump" played when a fill power-up materializes a block.
 // A short sine drop from 220 Hz to 110 Hz reads as something solid
 // settling into place — opposite character from the chisel "crack."

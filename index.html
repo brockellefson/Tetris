@@ -64,7 +64,7 @@
       <div id="board-wrap">
         <canvas id="board" width="300" height="600"></canvas>
         <div id="notifications"></div>
-        <div id="overlay" class="hidden">PAUSED<small>PRESS P TO RESUME</small></div>
+        <div id="overlay" class="hidden">PAUSED<small>PRESS P OR ESC TO RESUME</small></div>
         <!-- Debug button — pinned inside the board wrap; only visible
              while the game is paused. Clicking it opens #debug-menu so
              the player can apply blessings & curses on demand and tune
@@ -162,6 +162,11 @@
       <section class="debug-section">
         <h3>Curses</h3>
         <div class="debug-grid" id="debug-curses"></div>
+      </section>
+
+      <section class="debug-section">
+        <h3>Specials <small>(forces on next spawn)</small></h3>
+        <div class="debug-grid" id="debug-specials"></div>
       </section>
 
       <button id="debug-close-btn" class="debug-close-btn" type="button">CLOSE</button>

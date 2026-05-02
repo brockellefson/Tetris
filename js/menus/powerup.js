@@ -87,18 +87,24 @@ export function setupPowerupMenu(game) {
       cardEls.push(card);
     });
 
-    function setSelected(i) {
+    function setSelected(i, { silent = false } = {}) {
       const next = ((i % choices.length) + choices.length) % choices.length;
       // Only blip when the highlight actually moves. Suppresses the
       // initial setSelected(0) call and mouseenter events that
       // re-target the already-selected card.
-      if (next !== selected) playCycleSound();
+      if (!silent && next !== selected) playCycleSound();
       selected = next;
       cardEls.forEach((el, idx) => {
         el.classList.toggle('selected', idx === selected);
       });
+      // Move native focus to the selected card so the unified
+      // :focus-visible white outline picks it up alongside the
+      // existing .selected cyan glow. Native focus also makes
+      // Enter/Space activation work as a fallback if anything
+      // ever bypasses the menu's own keydown handler.
+      cardEls[selected].focus();
     }
-    setSelected(0); // visible cursor on first card
+    setSelected(0, { silent: true }); // visible cursor on first card
 
     function onKey(e) {
       // stopImmediatePropagation prevents the keydown reaching the
@@ -157,6 +163,16 @@ export function setupPowerupMenu(game) {
   // count so the freeze ends and play resumes.
   function showPowerUpMenu() {
     if (!powerupMenu$.classList.contains('hidden')) return;
+    // Re-check the freeze gates at open time. showNext() rAF-queues
+    // this function, and by the time the rAF fires a freezing plugin
+    // (Gravity cascade triggered by a special on the just-cleared
+    // row, etc.) may have flipped on. Defer back into showNext so
+    // the standard "wait for cascade complete → onGravityComplete →
+    // showNext" loop reopens us when the world has settled.
+    if (game.gameOver) return;
+    if (game.chisel.active || game.chisel.target) return;
+    if (game.fill.active || game.fill.target) return;
+    if (game.gravity.active) return;
     const powerups = pickChoices(game, 3);
     if (powerups.length === 0) {
       game.pendingChoices = 0;

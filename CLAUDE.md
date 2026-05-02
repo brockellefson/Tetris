@@ -25,11 +25,21 @@ Tetris/
     ├── powerups/
     │   ├── index.js    ← ALL_POWERUPS registry + pickChoices()
     │   ├── hold.js, ghost.js, psychic.js, mercy.js, tired.js, dispell.js   ← simple flag-mutators
-    │   └── slick.js, whoops.js, chisel.js, fill.js, gravity.js, flip.js    ← plugins (lifecycle hooks)
-    └── curses/
-        ├── index.js    ← ALL_CURSES registry + pickCurseChoices()
-        ├── junk.js, rain.js   ← one-shot mutations
-        └── growth.js, hyped.js, cruel.js   ← plugins (lifecycle hooks)
+    │   └── slick.js, whoops.js, chisel.js, fill.js, flip.js                ← plugins (lifecycle hooks)
+    ├── curses/
+    │   ├── index.js    ← ALL_CURSES registry + pickCurseChoices()
+    │   ├── junk.js, rain.js   ← one-shot mutations
+    │   └── growth.js, hyped.js, cruel.js   ← plugins (lifecycle hooks)
+    ├── specials/
+    │   ├── index.js    ← ALL_SPECIALS registry + weighted picker + the
+    │   │                 specials plugin (decoratePiece + beforeClear +
+    │   │                 onClear + onCellRemoved + reset)
+    │   └── gravity.js  ← Gravity special — onTrigger calls startGravityCascade
+    └── effects/
+        └── gravity-cascade.js  ← board-compaction engine (was the Gravity
+                                  power-up). Pure — no card metadata, just
+                                  freezesGameplay/tick hooks. Triggered today
+                                  by the Gravity special and the debug menu.
 ```
 
 **`main.js` is a wiring file.** All concrete UI logic — HUD sync, the power-up modal, the debug panel — lives in dedicated modules. main.js just imports them, calls `setupHUD()` / `setupPowerupMenu(game)` / `setupDebug(game)` once at boot, and routes engine callbacks (`game.onTetris`, `game.onPowerUpChoice`, etc.) into the appropriate module method. Adding a new UI surface (e.g. a settings menu, a stats overlay) should follow the same pattern: a new file under `js/` or `js/menus/`, a `setupX(game?)` factory returning a small control object, and a couple of lines of wiring in main.js.
@@ -41,7 +51,7 @@ Tetris/
 - **`piece.js` and `board.js` are pure.** Move/rotate/collision functions return new values or `null` when blocked. The `Game` decides whether to accept the result.
 - **`input.js` translates keys to actions.** It calls high-level methods on `Game` or dispatches actions through the plugin bus (`game._interceptInput('flip:activate')`). Side-effects (overlays, sounds) are passed in as callbacks.
 - **`constants.js` is the tuning knob.** Most numerical balance changes happen here.
-- **Power-ups and curses are plugins.** Anything beyond a flag-mutation lives in its own file under `js/powerups/` or `js/curses/`. Game dispatches into them through a fixed set of lifecycle hooks; nothing in `game.js` knows the names of any specific power-up or curse.
+- **Power-ups, curses, and specials are plugins.** Anything beyond a flag-mutation lives in its own file under `js/powerups/`, `js/curses/`, or `js/specials/`. Game dispatches into them through a fixed set of lifecycle hooks; nothing in `game.js` knows the names of any specific power-up, curse, or special block.
 
 ## The plugin system
 
@@ -64,14 +74,46 @@ Each non-trivial power-up or curse exports a single object with a card definitio
 | `interceptInput(game, action, ...args)` | Return `true` to claim the action. Used by Chisel/Fill/Whoops/Flip for their key spends, by cell-pick cursors for `cursor:*`, and by the board click handler for `boardClick(col, row)`. |
 | `modifyGravityIndex(game, idx)`   | Modifier hook, threaded through `_reduceHookValue`. Hyped adds `+1` per stack so pieces fall faster.                                            |
 | `allowsBagPiece(game, type)`      | Veto hook, polled via `_allowedByAllPlugins`. Returning `false` for a type drops it from the next bag refill. Cruel uses this to forbid I-pieces. |
+| `decoratePiece(game, piece)`      | Modifier hook, threaded through `_reduceHookValue`, fired inside `spawnNext()` between `spawn(type)` and the assignment to `current`. Specials uses this to possibly attach a tagged mino. |
+| `beforeClear(game, rows)`         | Fires inside `completeClear()` and `completeCascadeClear()` immediately before `removeRows`, with the row indices about to be removed. Specials captures triggers and shifts its parallel grid here. |
+| `onCellRemoved(game, x, y, source)` | Fires from single-cell removers (Chisel today) AFTER the board cell is nulled. `source` distinguishes call sites. Specials fires the cell's trigger here. |
 
 **State slots stay on `Game`** for things the renderer/HUD needs to read:
 - `game.unlocks.{hold, ghost, slick, nextCount, chiselCharges, fillCharges, flipCharges, whoopsCharges}` — flags & charge counters
 - `game.curses.{junk, hyped, cruelUntilLevel, extraCols}` — active-curse state for the HUD
 - `game.chisel`, `game.fill`, `game.gravity` — plugin state slots that the renderer reads to paint cursors / animations / hide the parked piece during cascades
 - `game.lockDelayTimer` — Slick's timer (Game initializes it; Slick reads/writes it)
+- `game.boardSpecials` — parallel-to-`game.board` grid of special-block tags (`'gravity' | null`). Owned by the specials plugin; lives on Game so the renderer and Whoops snapshot can read it directly.
+- `game._forceNextSpecial` — debug-only: when set, the specials plugin's `decoratePiece` consumes it on the next spawn instead of rolling.
 
 The decoupling is on the **behavior** side: the engine holds the data, plugins hold the logic.
+
+## Special blocks
+
+A **special block** is metadata attached to a single mino. While the piece is falling, the special travels with it (anchored by piece-local rot-0 coords + the `transformLocalCoord` helper in `pieces.js`). When the piece locks, the special anchors to a board cell in the parallel `game.boardSpecials` grid. When that cell is removed — by a line clear, by Chisel, or by any future single-cell remover that fires `onCellRemoved` — the special's `onTrigger(game, x, y, source)` runs and decides what happens.
+
+Each special exports the same shape the power-ups and curses do, plus visual identity:
+
+```js
+export default {
+  id: 'gravity',
+  name: 'Gravity',
+  description: 'When this block clears, every locked block falls to fill empty space below.',
+  rarity: 'rare',                                   // common|uncommon|rare|legendary
+  palette: ['#ffd700', '#ff8a1a', '#ff2e63'],       // colors to cycle through
+  animation: { speed: 1.6, glowBoost: 0.5 },        // cycles/sec + extra halo
+  available: () => true,
+  onTrigger: (game, x, y, source) => { startGravityCascade(game); },
+};
+```
+
+The renderer reads `palette` and `animation` generically — no per-special branching anywhere outside the special's own file. `rarity` drives both the spawn weight (via `SPECIAL_RARITY_WEIGHTS` in `constants.js`) and the visual amplification (via `RARITY_VFX` in `render.js`), so rarer specials look louder and spawn less often.
+
+**Spawn policy** is one constant curve (`SPECIAL_BLOCK_BASE_CHANCE` + `PER_LEVEL_BONUS` capped at `MAX_CHANCE`) plus weighted random over the eligible registry. The roll happens once per spawn inside the specials plugin's `decoratePiece` hook.
+
+**Triggering on chisel** falls out of `onCellRemoved` — the chisel plugin fires the hook after nulling the cell, and the specials plugin's listener fires the cell's trigger. Bombs / lightning / any future single-cell special gets chisel-triggering for free.
+
+**Cascading triggers** — if a Gravity special on a row clears another row that contains another Gravity special, the second `onTrigger` call into `startGravityCascade` is idempotent (it refuses to re-enter when one is already running). The cascade runs through the same `beforeClear` → `removeRows` → `onClear` pipeline as a player-driven clear, so chained specials work without special handling.
 
 ## UI conventions
 
@@ -92,6 +134,7 @@ Sounds live in `js/sound.js` and are imported by `js/main.js`. If a new cue is n
 | Different scoring or level curves                         | `LINE_SCORES` and `GRAVITY` in `constants.js`                         |
 | New power-up (blessing)                                   | New file in `js/powerups/`, register in `js/powerups/index.js`         |
 | New curse                                                 | New file in `js/curses/`, register in `js/curses/index.js`             |
+| New special block                                         | New file in `js/specials/`, register in `js/specials/index.js`. If the trigger needs ongoing per-frame logic (cascades, timers), put the engine in `js/effects/` and have the special's `onTrigger` call into it. |
 | New gameplay mechanic (T-spins, combos, garbage rows)     | Usually a new plugin. Only touch `game.js` if you need to add a new dispatch site or hook. |
 | Game modes (sprint, marathon, zen)                        | Add a `mode` field to `Game`, branch logic in `tick()` and `lockCurrent()` |
 | Different keys, gamepad, touch                            | `input.js` only                                                       |
@@ -121,13 +164,22 @@ Hold, Ghost, Mercy, Tired, and Dispell all follow this pattern. No plugin regist
 
 ### Add a power-up that needs lifecycle hooks
 
-Slick, Whoops, Chisel, Fill, Gravity, Flip all follow this pattern.
+Slick, Whoops, Chisel, Fill, Flip all follow this pattern.
 
 1. Create `js/powerups/foo.js`. Export the same card object as above, plus the relevant hooks (`tick`, `freezesGameplay`, `onSpawn`, `interceptInput`, etc.).
 2. If the power-up has a key binding, dispatch from `input.js` via `game._interceptInput('foo:activate')`. The plugin's `interceptInput` claims the action and does its work.
 3. If the power-up freezes gameplay (modal pick, cascade), return `true` from `freezesGameplay(game)` while the modal is up. `Game.tick()` will skip its standard body for you; your `tick` hook still runs to advance any animation timers.
 4. Register the plugin from `main.js`: `import fooPlugin from './powerups/foo.js'; game.registerPlugin(fooPlugin);`.
 5. Add it to `ALL_POWERUPS` in `js/powerups/index.js` so it can roll in the choice menu.
+
+### Add a new special block
+
+Bomb, lightning, multiplier — anything that "fires when its block breaks." Pattern:
+
+1. Create `js/specials/foo.js`. Export a default object with `id`, `name`, `description`, `rarity` (`common` / `uncommon` / `rare` / `legendary`), `palette` (1+ hex colors to cycle through), `animation` (`{ speed, glowBoost }`), `available(game)`, and `onTrigger(game, x, y, source)`.
+2. Add the import + an entry in `ALL_SPECIALS` in `js/specials/index.js`. Done — the special now rolls in the spawn picker (weighted by rarity), renders with its palette + glow, and fires on both line clears and chisel.
+3. If `onTrigger` needs ongoing per-frame logic (a multi-step animation, a cascade), put the engine in a new file under `js/effects/` and register it as a plugin from `main.js` exactly like `gravity-cascade.js`. The special itself stays a tiny adapter that just calls into the engine.
+4. Add a "Force <Name>" pill to the debug menu — actually, you don't have to. The debug `Specials` grid auto-builds from `ALL_SPECIALS`, so the pill appears automatically.
 
 ### Add a "no-curse" blessing
 

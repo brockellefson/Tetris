@@ -31,6 +31,9 @@
 //   'cursor:left' / 'right' /
 //     'up'   / 'down'             Arrow / WASD, only when chisel.active
 //   'cursor:confirm'              Enter / Space, only when chisel.active
+//   'cursor:cancel'               Esc, only when chisel.active —
+//                                 refunds the charge and resumes the
+//                                 menu queue
 //   'boardClick' (col, row)       Mouse / tap, only when chisel.active
 //
 // Activation gating mirrors the original tryActivateChisel: refuses
@@ -89,6 +92,11 @@ function selectCell(game, x, y) {
   game.chisel.active = false;
   game.chisel.cursor = null;
   game.chisel.target = { x, y, type, timer: 0 };
+  // Notify single-cell removal via the plugin bus. Specials listens
+  // on this hook and fires the cell's onTrigger if it carried one
+  // — letting a chisel'd Gravity special kick off a cascade while
+  // the chisel-shatter animation is still playing on top.
+  game._notifyPlugins('onCellRemoved', x, y, 'chisel');
   game.onChiselHit?.();
   return true;
 }
@@ -163,6 +171,18 @@ export default {
       case 'cursor:confirm':
         if (!game.chisel.active || !game.chisel.cursor) return false;
         return selectCell(game, game.chisel.cursor.x, game.chisel.cursor.y);
+      case 'cursor:cancel':
+        // Bail out of an active pick. Symmetric with activate(): we
+        // refund the charge that activate() decremented, drop the
+        // active/cursor state, and notify main.js that the menu
+        // queue can resume (a chisel earned mid-clear may have a
+        // power-up choice waiting behind it).
+        if (!game.chisel.active) return false;
+        game.unlocks.chiselCharges += 1;
+        game.chisel.active = false;
+        game.chisel.cursor = null;
+        game.onChiselComplete?.();
+        return true;
       case 'boardClick': {
         if (!game.chisel.active) return false;
         const [col, row] = args;

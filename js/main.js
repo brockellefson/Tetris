@@ -25,6 +25,7 @@ import { setupInput } from './input.js';
 import {
   playLockSound, playClearSound, playCycleSound, playMenuHoverSound,
   playMenuStartSound, playChiselSound, playFillSound, playFlipSound,
+  playSpecialTriggerSound, playGravitySuckSound, playSpecialSpawnSound,
 } from './sound.js';
 import { COLS, ROWS, BLOCK } from './constants.js';
 import { setupHUD } from './hud.js';
@@ -40,11 +41,18 @@ import slickPlugin   from './powerups/slick.js';
 import whoopsPlugin  from './powerups/whoops.js';
 import chiselPlugin  from './powerups/chisel.js';
 import fillPlugin    from './powerups/fill.js';
-import gravityPlugin from './powerups/gravity.js';
 import flipPlugin    from './powerups/flip.js';
 import growthCurse   from './curses/growth.js';
 import hypedCurse    from './curses/hyped.js';
 import cruelCurse    from './curses/cruel.js';
+// Gravity used to be a power-up; it's now a special block. The
+// cascade engine still needs lifecycle hooks (freezesGameplay, tick)
+// to drive its per-frame logic, so it's registered as an "effect"
+// plugin here. The specials plugin sits beside it and handles the
+// spawn-tag / line-clear-trigger pipeline that actually fires the
+// cascade.
+import gravityCascadePlugin from './effects/gravity-cascade.js';
+import specialsPlugin       from './specials/index.js';
 
 // -------- DOM lookups owned by main --------
 // Everything else lives inside its module. We keep here only what the
@@ -70,14 +78,17 @@ const hud = setupHUD();
 const powerupMenu = setupPowerupMenu(game);
 const debug = setupDebug(game);
 
-// Register lifecycle plugins. Order doesn't matter today (no plugin
-// reads another's state during dispatch) but if it ever does,
-// register in the order you want hooks to fire.
+// Register lifecycle plugins. Order matters in one place: the
+// specials plugin must register BEFORE the gravity cascade so its
+// `reset` hook initializes `game.boardSpecials` before any other
+// hook reads it. (Game.reset() also seeds boardSpecials defensively
+// in case main.js wires plugins in a different order someday.)
+game.registerPlugin(specialsPlugin);
+game.registerPlugin(gravityCascadePlugin);
 game.registerPlugin(slickPlugin);
 game.registerPlugin(whoopsPlugin);
 game.registerPlugin(chiselPlugin);
 game.registerPlugin(fillPlugin);
-game.registerPlugin(gravityPlugin);
 game.registerPlugin(flipPlugin);
 game.registerPlugin(growthCurse);
 game.registerPlugin(hypedCurse);
@@ -110,6 +121,39 @@ game.onGravityComplete  = () => powerupMenu.showNext();
 // silent without a blip, so we surface a small notification.
 game.onJunk = (n) => hud.notify(n > 1 ? `JUNK +${n}` : 'JUNK', 'b2b', 1400);
 game.onRain = (n) => hud.notify(n > 1 ? `RAIN +${n}` : 'RAIN', 'b2b', 1300);
+
+// Special-block audio. Two engine callbacks, both routed through
+// per-kind maps with a generic fallback:
+//
+//   onSpecialSpawn(kind)            — fires at the moment a piece
+//                                     carrying a special appears.
+//                                     Generic fallback: an electric
+//                                     "shock jolt" — read as ALERT.
+//
+//   onSpecialTrigger(kind, source)  — fires right before the special's
+//                                     onTrigger runs (line clear or
+//                                     chisel today). Generic fallback:
+//                                     a bright "shimmer-pop." Gravity
+//                                     gets its own suction cue.
+//
+// Adding sound for a new special is one entry per map plus the synth
+// voice in sound.js — no engine or specials-plugin changes needed.
+// Specials don't import sound; sound doesn't know about specials;
+// main.js wires the two together.
+const SPECIAL_SPAWN_SOUNDS = {
+  // Gravity uses the generic shock for spawn — its identity is in the
+  // suction trigger sound, not the alert. Add per-kind overrides here
+  // when a future special wants a distinct spawn cue.
+};
+const SPECIAL_TRIGGER_SOUNDS = {
+  gravity: playGravitySuckSound,
+};
+game.onSpecialSpawn = (kind) => {
+  (SPECIAL_SPAWN_SOUNDS[kind] || playSpecialSpawnSound)();
+};
+game.onSpecialTrigger = (kind /*, source */) => {
+  (SPECIAL_TRIGGER_SOUNDS[kind] || playSpecialTriggerSound)();
+};
 
 // -------- Background theme music --------
 // Plain <audio loop> handles the looping for us — we just drive
@@ -144,7 +188,7 @@ setupInput(game, {
     debug.hideLauncher();
   },
   onPause: () => {
-    hud.showOverlay('PAUSED', 'PRESS P TO RESUME');
+    hud.showOverlay('PAUSED', 'PRESS P OR ESC TO RESUME');
     pauseTheme();
     // Pause is the only state where the Debug button is reachable —
     // surfacing it elsewhere would let the player dump unlimited

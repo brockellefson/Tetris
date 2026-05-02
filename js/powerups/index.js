@@ -21,8 +21,14 @@ import flip      from './flip.js';
 import tired     from './tired.js';
 import slick     from './slick.js';
 import whoops    from './whoops.js';
-import gravity   from './gravity.js';
 import dispell   from './dispell.js';
+
+// NOTE: Gravity used to live here as a one-shot blessing. It moved
+// to a special block (see js/specials/gravity.js) — the player now
+// earns the cascade by clearing (or chiseling) a Gravity-tagged
+// mino, rather than picking it from a menu. The cascade engine
+// itself lives in js/effects/gravity-cascade.js so any future
+// trigger source (curse, key combo, chained special) can call it.
 
 export const ALL_POWERUPS = [
   hold,
@@ -39,7 +45,6 @@ export const ALL_POWERUPS = [
   tired,
   slick,
   whoops,
-  gravity,
   dispell,
 ];
 

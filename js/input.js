@@ -18,13 +18,16 @@
 //   S           spend a Fill charge (if banked)
 //   F           spend a Flip charge (if banked) — mirrors the active piece
 //   W           spend the Whoops charge (if banked) — undoes the last piece
-//   P           pause
+//   P / Esc     pause / unpause
 //   R           restart
 //
 // Note: while a chisel or fill session is active, A/S/W/D shift
 // the on-board cursor for the cell pick (handled in the early-return
 // branch below). The "spend a charge" binding only fires from the
-// normal-gameplay switch at the bottom.
+// normal-gameplay switch at the bottom. Esc during a chisel/fill
+// session cancels the pick (refunding the charge); Esc during the
+// debug menu closes it (handled in debug.js with stopPropagation
+// so the same keypress doesn't also unpause).
 // ============================================================
 
 export function setupInput(game, callbacks = {}) {
@@ -53,9 +56,12 @@ export function setupInput(game, callbacks = {}) {
       return;
     }
 
-    // While paused, only P resumes
+    // While paused, P or Esc resumes. (When the debug menu is open
+    // its capture-phase Esc handler swallows the event before it
+    // reaches us, so closing the debug menu doesn't also unpause.)
     if (game.paused) {
-      if (e.key === 'p' || e.key === 'P') {
+      if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
+        e.preventDefault();
         game.togglePause();
         callbacks.onResume?.();
       }
@@ -112,6 +118,12 @@ export function setupInput(game, callbacks = {}) {
             e.preventDefault();
             game._interceptInput('cursor:confirm');
             return;
+          case 'Escape':
+            // Cancel the pick — the plugin refunds the charge and
+            // fires onChiselComplete so the menu queue resumes.
+            e.preventDefault();
+            game._interceptInput('cursor:cancel');
+            return;
         }
       }
       return;
@@ -154,6 +166,12 @@ export function setupInput(game, callbacks = {}) {
           case ' ':
             e.preventDefault();
             game._interceptInput('cursor:confirm');
+            return;
+          case 'Escape':
+            // Cancel the pick — the plugin refunds the charge and
+            // fires onFillComplete so the menu queue resumes.
+            e.preventDefault();
+            game._interceptInput('cursor:cancel');
             return;
         }
       }
@@ -231,6 +249,7 @@ export function setupInput(game, callbacks = {}) {
         game._interceptInput('whoops');
         break;
       case 'p': case 'P':
+      case 'Escape':
         e.preventDefault();
         game.togglePause();
         callbacks.onPause?.();

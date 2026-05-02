@@ -41,12 +41,19 @@ import {
   playMenuOpenSound,
   playMenuHoverSound,
 } from './sound.js';
+import { wireArrowNav } from './menus/keynav.js';
 // One-shot blessings whose apply() IS their entire behavior; we
 // defer to the card's own apply() rather than re-implementing it.
 import mercyPlugin   from './powerups/mercy.js';
 import tiredPlugin   from './powerups/tired.js';
-import gravityPlugin from './powerups/gravity.js';
 import dispellPlugin from './powerups/dispell.js';
+// Gravity is no longer a power-up — it's a special block. The debug
+// "Gravity" pill calls the cascade engine directly so testers can
+// trigger the effect without needing to spawn-and-clear a tagged piece.
+import { startGravityCascade } from './effects/gravity-cascade.js';
+// Specials registry — used to build the "force special on next spawn"
+// pill grid so testers can stage any special on demand.
+import { ALL_SPECIALS } from './specials/index.js';
 // Curse plugins — same pattern. apply() runs the curse's full
 // effect (drop junk rows, stack hyped, set the cruel level cap,
 // rain blocks, widen the board).
@@ -128,9 +135,30 @@ const DEBUG_BLESSINGS = [
   // mirror the real pick path. No persistent "active" state.
   { id: 'mercy',   name: 'Mercy',   apply: (g) => mercyPlugin.apply(g),   isActive: () => false },
   { id: 'tired',   name: 'Tired',   apply: (g) => tiredPlugin.apply(g),   isActive: () => false },
-  { id: 'gravity', name: 'Gravity', apply: (g) => gravityPlugin.apply(g), isActive: () => false },
+  // Gravity isn't a card anymore — the pill kicks the cascade engine
+  // directly so testers can still trigger the effect on demand. The
+  // engine refuses if a cascade is already running, matching the
+  // production trigger path (the Gravity special block).
+  { id: 'gravity', name: 'Gravity Cascade',
+    apply: (g) => startGravityCascade(g),
+    isActive: (g) => g.gravity?.active === true },
   { id: 'dispell', name: 'Dispell', apply: (g) => dispellPlugin.apply(g), isActive: () => false },
 ];
+
+// "Force a special on the next-spawned piece" pills. Reads ALL_SPECIALS
+// so adding a new special automatically gets a debug pill — zero edits
+// here. Setting `_forceNextSpecial = id` is consumed by the specials
+// plugin's decoratePiece on the next spawnNext(), so the next piece
+// always carries the chosen special. Clicking the pill again before
+// the next spawn changes the queued kind; clicking the same pill
+// twice (re-applying) re-arms it harmlessly.
+const DEBUG_SPECIALS = ALL_SPECIALS.map(s => ({
+  id: `force-${s.id}`,
+  name: `Force ${s.name}`,
+  apply:    (g) => { g._forceNextSpecial = s.id; },
+  remove:   (g) => { if (g._forceNextSpecial === s.id) g._forceNextSpecial = null; },
+  isActive: (g) =>   g._forceNextSpecial === s.id,
+}));
 
 // remove() notes per curse:
 //   • Junk    — clears the flag. Already-dropped junk rows stay on
@@ -182,6 +210,7 @@ export function setupDebug(game) {
   const debugMenu$       = document.getElementById('debug-menu');
   const debugBlessings$  = document.getElementById('debug-blessings');
   const debugCurses$     = document.getElementById('debug-curses');
+  const debugSpecials$   = document.getElementById('debug-specials');
   const debugLevelInput$ = document.getElementById('debug-level-input');
   const debugLevelUp$    = document.getElementById('debug-level-up');
   const debugLevelDown$  = document.getElementById('debug-level-down');
@@ -230,6 +259,11 @@ export function setupDebug(game) {
   // ---- Build the pill grids ----
   for (const card of DEBUG_BLESSINGS) debugBlessings$.appendChild(makePill(card));
   for (const card of DEBUG_CURSES)    debugCurses$.appendChild(makePill(card, 'curse'));
+  // Specials grid only renders if the host markup has the section —
+  // skip silently otherwise so the menu still works on older HTML.
+  if (debugSpecials$) {
+    for (const card of DEBUG_SPECIALS) debugSpecials$.appendChild(makePill(card));
+  }
 
   // ---- Level controls ----
   function setLevel(n) {
@@ -281,12 +315,47 @@ export function setupDebug(game) {
   });
 
   // Esc closes the menu without unpausing — peek-and-back-out.
+  // The capture-phase listener fires before input.js's bubble-phase
+  // keydown handler, and stopPropagation keeps the same key from
+  // also tripping input.js's pause toggle (which now also binds Esc).
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && menuVisible()) {
       e.preventDefault();
+      e.stopPropagation();
       hideMenu();
     }
   }, { capture: true });
+
+  // Arrow-key navigation across the whole panel — the +/- / SET row,
+  // every blessing / curse / specials pill, and the close button. The
+  // level <input> is intentionally absent: it owns ArrowUp/Down for
+  // the native number stepper and ArrowLeft/Right for caret movement,
+  // and the helper already passes those through whenever a text/number
+  // input has focus. Tab still reaches it as usual.
+  const nav = wireArrowNav({
+    getButtons: () => [
+      debugLevelDown$,
+      debugLevelUp$,
+      debugLevelApply$,
+      ...pills.map(p => p.el),
+      debugCloseBtn$,
+    ],
+    isOpen: menuVisible,
+    onMove: playCycleSound,
+  });
+
+  // Arrow-key nav for the pause overlay itself — the Debug button is
+  // the only interactive surface there, so the very first arrow press
+  // while paused focuses it. Enter/Space then opens the menu (native
+  // button activation), at which point the launcher hides under the
+  // debug-menu modal and the nav above takes over. Active only while
+  // the launcher is on screen AND the debug menu isn't yet open, so
+  // it doesn't fight the panel-level nav.
+  wireArrowNav({
+    getButtons: () => (launcherVisible() && !menuVisible()) ? [debugBtn$] : [],
+    isOpen:     ()  => launcherVisible() && !menuVisible(),
+    onMove: playCycleSound,
+  });
 
   function showMenu() {
     // Snap the input to the live level so opening mid-game doesn't
@@ -296,6 +365,9 @@ export function setupDebug(game) {
     // Re-evaluate active highlights — game state may have changed
     // since the menu was last open (line clears, level-ups, etc.).
     refreshActive();
+    // Seed keyboard focus on the first button so arrow keys work
+    // immediately without the user having to click first.
+    nav.focusFirst();
     playMenuOpenSound();
   }
   function hideMenu() {
