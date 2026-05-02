@@ -53,12 +53,25 @@ export function tryMove(board, piece, dx, dy) {
 // Try to rotate a piece. dir is +1 (clockwise) or -1 (counter-clockwise).
 // Walks the SRS kick table — first offset that fits wins. Returns null
 // if every kick is blocked.
+//
+// Flipped-piece handling: a horizontal mirror is orientation-reversing,
+// so on a flipped piece the *visual* sense of rotation is opposite the
+// underlying `rot` increment. To keep CW key = visual CW, we invert the
+// direction we apply to `rot`, and we also negate the dx of each kick
+// offset so wall-kicks reach the wall the player actually sees. For
+// JLSTZ this is exact — SRS's `0>1` and `0>3` kick tables are dx-mirrors
+// of each other, so direction-swap + dx-negation reproduces the canonical
+// kicks for the visual rotation.
 export function tryRotate(board, piece, dir) {
   if (piece.type === 'O') return piece; // O never needs rotation
+  const effectiveDir = piece.flipped ? -dir : dir;
   const from = piece.rot;
-  const to = (from + (dir > 0 ? 1 : 3)) % 4;
+  const to = (from + (effectiveDir > 0 ? 1 : 3)) % 4;
   const key = `${from}>${to}`;
-  const kicks = piece.type === 'I' ? KICKS_I[key] : KICKS_JLSTZ[key];
+  const rawKicks = piece.type === 'I' ? KICKS_I[key] : KICKS_JLSTZ[key];
+  const kicks = piece.flipped
+    ? rawKicks.map(([dx, dy]) => [-dx, dy])
+    : rawKicks;
   for (const [dx, dy] of kicks) {
     const test = { ...piece, rot: to, x: piece.x + dx, y: piece.y + dy };
     if (!collides(board, test)) return test;
