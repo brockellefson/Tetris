@@ -1,12 +1,15 @@
-// Power-up: Chisel — grants a banked charge that lets the player
-// remove a single 1×1 block of their choice from the board.
+// Power-up: Chisel — unlock-once modal ability. Once picked, the
+// player can press A to remove a single 1×1 block of their choice
+// from the board, gated by a per-cast cooldown (COOLDOWN_LINES
+// lines must clear before another cast is allowed).
 //
 // This module exports a single object with two roles:
 //
 //   1. Power-up card (id, name, description, available, apply) —
 //      consumed by the choice-menu / power-up registry. Picking the
-//      card just bumps `game.unlocks.chiselCharges`; the heavy
-//      interaction lives in the lifecycle hooks below.
+//      card flips `game.unlocks.chisel` to true and never appears
+//      again in the menu (`available` returns false thereafter).
+//      The heavy interaction lives in the lifecycle hooks below.
 //
 //   2. Lifecycle plugin (freezesGameplay, tick, interceptInput,
 //      reset) — registered on the Game in main.js. The chisel state
@@ -42,7 +45,7 @@
 // modal is up (powerup menu, line-clear animation, fill modal,
 // gravity cascade), with no charges, or on a fully empty board.
 
-import { CHISEL_DURATION, MAX_CHISEL_CHARGES } from '../constants.js';
+import { CHISEL_DURATION, COOLDOWN_LINES } from '../constants.js';
 
 // Convenience accessor — the slot is initialized in reset() so it's
 // always present once the game has started, but the optional-chain
@@ -118,13 +121,17 @@ function activate(game) {
   if (game.isClearing()) return false;
   if (s.active || s.target) return false;
   if (game._isFrozenByPlugin()) return false; // fill modal, gravity cascade, etc.
-  if (game.unlocks.chiselCharges <= 0) return false;
+  if (!game.unlocks.chisel) return false;
+  // Per-cast cooldown — once the player has cast Chisel, the next
+  // cast is locked behind COOLDOWN_LINES line clears. The HUD
+  // surfaces this with a gray tag and a left-to-right progress fill.
+  if (s.cooldown > 0) return false;
   // No locked block on the board → activating would just hang the
   // game waiting on a confirm that can't succeed. Refuse.
   const hasBlock = game.board.some(row => row.some(cell => cell !== null));
   if (!hasBlock) return false;
-  game.unlocks.chiselCharges -= 1;
   s.active = true;
+  s.cooldown = COOLDOWN_LINES;
   initCursor(game);
   return true;
 }
@@ -132,13 +139,10 @@ function activate(game) {
 export default {
   id: 'chisel',
   name: 'Chisel',
-  description: 'Press A to remove any 1×1 block. One charge.',
-  available: (game) => game.unlocks.chiselCharges < MAX_CHISEL_CHARGES,
+  description: 'Press A to remove any 1×1 block. 5-line cooldown.',
+  available: (game) => !game.unlocks.chisel,
   apply: (game) => {
-    game.unlocks.chiselCharges = Math.min(
-      MAX_CHISEL_CHARGES,
-      game.unlocks.chiselCharges + 1,
-    );
+    game.unlocks.chisel = true;
   },
 
   // ---- lifecycle hooks ----
@@ -147,7 +151,18 @@ export default {
   // so a restart doesn't carry stale active/target/cursor state across
   // runs. Owns the slot's lifetime; nothing else writes here.
   reset(game) {
-    game._pluginState.chisel = { active: false, target: null, cursor: null };
+    game._pluginState.chisel = { active: false, target: null, cursor: null, cooldown: 0 };
+  },
+
+  // Tick the per-cast cooldown down once per cleared line. Note we
+  // explicitly DON'T expose serialize/restore — Whoops should not be
+  // able to rewind a cast back into "still available" state, otherwise
+  // a single Whoops would refund the cooldown of any other power-up
+  // that was spent during the rewound piece.
+  onClear(game, cleared) {
+    const s = cs(game);
+    if (!s) return;
+    if (s.cooldown > 0) s.cooldown = Math.max(0, s.cooldown - cleared);
   },
 
   freezesGameplay: (game) => {
@@ -194,13 +209,13 @@ export default {
         if (!s?.active || !s.cursor) return false;
         return selectCell(game, s.cursor.x, s.cursor.y);
       case 'cursor:cancel':
-        // Bail out of an active pick. Symmetric with activate(): we
-        // refund the charge that activate() decremented, drop the
-        // active/cursor state, and notify main.js that the menu
-        // queue can resume (a chisel earned mid-clear may have a
+        // Bail out of an active pick. The cast never resolved, so we
+        // wipe the cooldown that activate() armed; drop the active/
+        // cursor state and notify main.js that the menu queue can
+        // resume (a chisel pick that started mid-clear may have a
         // power-up choice waiting behind it).
         if (!s?.active) return false;
-        game.unlocks.chiselCharges += 1;
+        s.cooldown = 0;
         s.active = false;
         s.cursor = null;
         // No explicit completion callback — game.onPluginIdle fires

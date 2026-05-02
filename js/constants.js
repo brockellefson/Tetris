@@ -109,27 +109,16 @@ export const SHAKE_DURATION = 220;
 export const SHAKE_LOCK     = 2;
 export const SHAKE_HARDDROP = 4;
 
-// Chisel and Fill are banked consumables. Picking the power-up
-// card grants a charge; the player spends a charge by pressing A
-// (chisel) or S (fill). Each tops out at 1 charge — once the
-// player has banked one, the corresponding card no longer surfaces
-// in the choice menu (see `available` on those power-ups), so the
-// pick is a deliberate "save it for the moment that needs it"
-// decision rather than a stacked stockpile.
-export const MAX_CHISEL_CHARGES = 1;
-export const MAX_FILL_CHARGES = 1;
-
-// Flip — banked consumable that horizontally mirrors the active
-// piece. Pressing F spends one charge. Same single-charge cap as
-// Chisel and Fill.
-export const MAX_FLIP_CHARGES = 1;
-
-// Whoops — banked consumable that rewinds the world to just before
-// the active piece spawned. Pressing W spends the charge. Capped at
-// 1 because it's a strong "take-back" effect: stacking would let the
-// player undo arbitrarily far back, which trivializes mistakes. Once
-// the player has a charge, the Whoops card no longer surfaces.
-export const MAX_WHOOPS_CHARGES = 1;
+// Per-cast cooldown for the modal-spend power-ups (Chisel, Fill,
+// Whoops, Flip). All four are unlock-once abilities — picking the
+// card grants a permanent unlock (no per-cast charge to refill);
+// each cast then arms a cooldown of N line clears before the player
+// can recast. Tuned to feel like "one big play per ~bag" — a Tetris
+// drains it instantly, but the player can't chain multiple modal
+// spends back-to-back. Each plugin stores its own remaining-line
+// counter in `_pluginState.<id>.cooldown`; the onClear hook
+// decrements all four in lock-step with line clears.
+export const COOLDOWN_LINES = 5;
 
 // Slick power-up — milliseconds a grounded piece can sit before locking,
 // giving the player a window to make split-second adjustments. The timer

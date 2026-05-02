@@ -1,12 +1,15 @@
-// Power-up: Fill — grants a banked charge that lets the player place
-// a single 1×1 block on any empty cell. Inverse of Chisel.
+// Power-up: Fill — unlock-once modal ability. Once picked, the
+// player can press S to place a single 1×1 block on any empty cell.
+// Inverse of Chisel; same gating model — the unlock is permanent and
+// each cast arms a per-cast cooldown.
 //
 // This module exports a single object with two roles:
 //
 //   1. Power-up card (id, name, description, available, apply) —
 //      consumed by the choice-menu / power-up registry. Picking the
-//      card just bumps `game.unlocks.fillCharges`; the heavy
-//      interaction lives in the lifecycle hooks below.
+//      card flips `game.unlocks.fill` to true and never appears
+//      again in the menu (`available` returns false thereafter).
+//      The heavy interaction lives in the lifecycle hooks below.
 //
 //   2. Lifecycle plugin (freezesGameplay, tick, interceptInput,
 //      reset) — registered on the Game in main.js. The fill state
@@ -44,7 +47,7 @@
 //                                 menu queue
 //   'boardClick' (col, row)       Mouse / tap, only when fill.active
 
-import { FILL_DURATION, MAX_FILL_CHARGES } from '../constants.js';
+import { COOLDOWN_LINES, FILL_DURATION } from '../constants.js';
 import { findFullRows } from '../board.js';
 
 // Convenience accessor — slot is initialized in reset() so it's
@@ -136,11 +139,15 @@ function activate(game) {
   if (game.isClearing()) return false;
   if (s.active || s.target) return false;
   if (game._isFrozenByPlugin()) return false;
-  if (game.unlocks.fillCharges <= 0) return false;
+  if (!game.unlocks.fill) return false;
+  // Per-cast cooldown — once the player has cast Fill, the next
+  // cast is locked behind COOLDOWN_LINES line clears. The HUD
+  // surfaces this with a gray tag and a left-to-right progress fill.
+  if (s.cooldown > 0) return false;
   const hasEmpty = game.board.some(row => row.some(cell => cell === null));
   if (!hasEmpty) return false;
-  game.unlocks.fillCharges -= 1;
   s.active = true;
+  s.cooldown = COOLDOWN_LINES;
   initCursor(game);
   return true;
 }
@@ -148,19 +155,29 @@ function activate(game) {
 export default {
   id: 'fill',
   name: 'Fill',
-  description: 'Press S to fill any empty cell. One charge.',
-  available: (game) => game.unlocks.fillCharges < MAX_FILL_CHARGES,
+  description: 'Press S to fill any empty cell. 5-line cooldown.',
+  available: (game) => !game.unlocks.fill,
   apply: (game) => {
-    game.unlocks.fillCharges = Math.min(
-      MAX_FILL_CHARGES,
-      game.unlocks.fillCharges + 1,
-    );
+    game.unlocks.fill = true;
   },
 
   // ---- lifecycle hooks ----
 
   reset(game) {
-    game._pluginState.fill = { active: false, target: null, cursor: null, savedPiece: null };
+    game._pluginState.fill = { active: false, target: null, cursor: null, savedPiece: null, cooldown: 0 };
+  },
+
+  // Tick the per-cast cooldown down once per cleared line. As with
+  // chisel, no serialize/restore — Whoops shouldn't refund the
+  // cooldown of a fill the rewind erases. Note that if the fill
+  // itself triggered the clear (player filled the gap to complete a
+  // row), this same hook decrements the cooldown by the line count
+  // — i.e., the fill-triggered clear DOES count toward the cooldown,
+  // matching the natural reading of "break 5 lines after the cast."
+  onClear(game, cleared) {
+    const s = fs(game);
+    if (!s) return;
+    if (s.cooldown > 0) s.cooldown = Math.max(0, s.cooldown - cleared);
   },
 
   freezesGameplay: (game) => {
@@ -198,13 +215,13 @@ export default {
         if (!s?.active || !s.cursor) return false;
         return selectCell(game, s.cursor.x, s.cursor.y);
       case 'cursor:cancel':
-        // Bail out of an active pick. Symmetric with activate(): we
-        // refund the charge that activate() decremented, drop the
-        // active/cursor state, and notify main.js that the menu
-        // queue can resume (a fill earned mid-clear may have a
+        // Bail out of an active pick. The cast never resolved, so we
+        // wipe the cooldown that activate() armed; drop the active/
+        // cursor state and notify main.js that the menu queue can
+        // resume (a fill pick that started mid-clear may have a
         // power-up choice waiting behind it).
         if (!s?.active) return false;
-        game.unlocks.fillCharges += 1;
+        s.cooldown = 0;
         s.active = false;
         s.cursor = null;
         // No explicit completion callback — game.onPluginIdle fires

@@ -63,11 +63,6 @@ import cruelCurse  from './curses/cruel.js';
 import rainCurse   from './curses/rain.js';
 import growthCurse from './curses/growth.js';
 
-// Counter value used for the "unlimited charge" blessings. Any
-// large number works; this one's far above what a player would
-// realistically spend in a single test session.
-const DEBUG_UNLIMITED = 9999;
-
 // "Seed Board" — paint the bottom half of the playfield with random
 // tetromino-colored rubble so the tester can jump straight to a
 // mid-game position without manually stacking pieces. Tuning knobs:
@@ -186,24 +181,32 @@ const DEBUG_BLESSINGS = [
     apply:    (g) => { g.unlocks.nextCount = Math.max(5, g.unlocks.nextCount); },
     remove:   (g) => { g.unlocks.nextCount = Math.min(g.unlocks.nextCount, 4); },
     isActive: (g) =>   g.unlocks.nextCount >= 5 },
-  // Charge-based — bypass the per-card cap so the user can hammer
-  // the key as much as they want during a test session.
+  // Unlock-once — Chisel / Fill / Flip / Whoops are toggled directly.
+  // Each cast still arms the per-cast cooldown via the plugin's
+  // activate path, so the debug pill just lets the tester gate the
+  // unlock itself. Toggling off also clears any in-flight cooldown
+  // so a tester re-enabling the pill doesn't have to wait for it
+  // to drain.
   { id: 'chisel', name: 'Chisel',
-    apply:    (g) => { g.unlocks.chiselCharges = DEBUG_UNLIMITED; },
-    remove:   (g) => { g.unlocks.chiselCharges = 0; },
-    isActive: (g) =>   g.unlocks.chiselCharges > 0 },
+    apply:    (g) => { g.unlocks.chisel = true; },
+    remove:   (g) => { g.unlocks.chisel = false;
+                       if (g._pluginState.chisel) g._pluginState.chisel.cooldown = 0; },
+    isActive: (g) =>   g.unlocks.chisel },
   { id: 'fill',   name: 'Fill',
-    apply:    (g) => { g.unlocks.fillCharges = DEBUG_UNLIMITED; },
-    remove:   (g) => { g.unlocks.fillCharges = 0; },
-    isActive: (g) =>   g.unlocks.fillCharges > 0 },
+    apply:    (g) => { g.unlocks.fill = true; },
+    remove:   (g) => { g.unlocks.fill = false;
+                       if (g._pluginState.fill) g._pluginState.fill.cooldown = 0; },
+    isActive: (g) =>   g.unlocks.fill },
   { id: 'flip',   name: 'Flip',
-    apply:    (g) => { g.unlocks.flipCharges = DEBUG_UNLIMITED; },
-    remove:   (g) => { g.unlocks.flipCharges = 0; },
-    isActive: (g) =>   g.unlocks.flipCharges > 0 },
+    apply:    (g) => { g.unlocks.flip = true; },
+    remove:   (g) => { g.unlocks.flip = false;
+                       if (g._pluginState.flip) g._pluginState.flip.cooldown = 0; },
+    isActive: (g) =>   g.unlocks.flip },
   { id: 'whoops', name: 'Whoops',
-    apply:    (g) => { g.unlocks.whoopsCharges = DEBUG_UNLIMITED; },
-    remove:   (g) => { g.unlocks.whoopsCharges = 0; },
-    isActive: (g) =>   g.unlocks.whoopsCharges > 0 },
+    apply:    (g) => { g.unlocks.whoops = true; },
+    remove:   (g) => { g.unlocks.whoops = false;
+                       if (g._pluginState.whoops) g._pluginState.whoops.cooldown = 0; },
+    isActive: (g) =>   g.unlocks.whoops },
   // One-shot effects — defer to the card's own apply so any side
   // effects (queue mutation, gravity cascade kickoff, dispell roll)
   // mirror the real pick path. No persistent "active" state.

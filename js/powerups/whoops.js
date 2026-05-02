@@ -1,10 +1,12 @@
-// Power-up: Whoops — banked one-shot rewind. Pressing W after the
-// player picks this card undoes the most recently locked piece: the
-// cells it placed are removed, any rows it cleared come back fully
-// populated, the score (line bonus + soft/hard drop points + combo +
-// B2B + perfect-clear) snaps back, lines and level revert, queue/hold
+// Power-up: Whoops — unlock-once rewind ability. Once picked,
+// pressing W undoes the most recently locked piece: the cells it
+// placed are removed, any rows it cleared come back fully populated,
+// the score (line bonus + soft/hard drop points + combo + B2B +
+// perfect-clear) snaps back, lines and level revert, queue/hold
 // revert, and the piece is respawned fresh at the top so the player
-// gets a do-over.
+// gets a do-over. Each cast arms a per-cast cooldown
+// (COOLDOWN_LINES line clears) so the player can't chain rewinds
+// every other piece.
 //
 // This module exports a single object with two roles:
 //
@@ -46,7 +48,7 @@
 //   later restore + spawnNext() round-trip puts the same piece back
 //   in play with the same upcoming queue order.
 
-import { MAX_WHOOPS_CHARGES } from '../constants.js';
+import { COOLDOWN_LINES } from '../constants.js';
 import { collides } from '../board.js';
 
 // Module-level snapshot state. Reset to null on game reset so a
@@ -91,21 +93,31 @@ function captureSnapshot(game) {
 export default {
   id: 'whoops',
   name: 'Whoops',
-  description: 'Press W to undo your last piece. One charge.',
-  available: (game) => game.unlocks.whoopsCharges < MAX_WHOOPS_CHARGES,
+  description: 'Press W to undo your last piece. 5-line cooldown.',
+  available: (game) => !game.unlocks.whoops,
   apply: (game) => {
-    game.unlocks.whoopsCharges = Math.min(
-      MAX_WHOOPS_CHARGES,
-      game.unlocks.whoopsCharges + 1,
-    );
+    game.unlocks.whoops = true;
   },
 
   // ---- lifecycle hooks ----
 
-  reset() {
+  reset(game) {
     prePieceSnapshot = null;
     whoopsSnapshot   = null;
     heldDuringSwap   = null;
+    // Cooldown lives in the plugin-state bag — that's the slot the
+    // HUD reads to render the cooldown progress tag. Deliberately
+    // NOT exposed via serialize/restore: a Whoops rewind shouldn't
+    // refund its OWN cooldown (and module-level state aside, the
+    // bag entry is just the HUD's view onto it).
+    game._pluginState.whoops = { cooldown: 0 };
+  },
+
+  // Tick the per-cast cooldown down once per cleared line.
+  onClear(game, cleared) {
+    const s = game._pluginState.whoops;
+    if (!s) return;
+    if (s.cooldown > 0) s.cooldown = Math.max(0, s.cooldown - cleared);
   },
 
   onSpawn(game) {
@@ -134,8 +146,13 @@ export default {
     // Charge & snapshot gate first so we don't consume the keypress
     // when there's nothing to do (caller treats falsy return as
     // unhandled, but for W there's no fallback — false is fine).
-    if (game.unlocks.whoopsCharges <= 0) return false;
+    if (!game.unlocks.whoops) return false;
     if (!whoopsSnapshot) return false;
+    // Per-cast cooldown — once the player has cast Whoops, the next
+    // cast is locked behind COOLDOWN_LINES line clears even if a
+    // fresh charge shows up before the timer drains. The HUD
+    // surfaces this as a "WHOOPS CD N/5" tag.
+    if (game._pluginState.whoops?.cooldown > 0) return false;
     // Gating differs slightly from other powerups:
     //   • Allowed during line-clear animation — we halt the animation
     //     and roll back, since the clear belongs to the piece being
@@ -197,8 +214,17 @@ export default {
     // spawnNext can flip gameOver if the restored top-of-queue piece
     // collides — that's a legitimate end (the player asked for the
     // restore and got back to the same dead board). Either way, the
-    // charge is spent.
-    game.unlocks.whoopsCharges -= 1;
+    // unlock stays — the cast itself is gated behind the cooldown
+    // armed below, not behind a consumable charge.
+    // Arm the per-cast cooldown. Set AFTER the rewind so the bag
+    // slot we just (re-)wrote isn't clobbered by the restore loop;
+    // since whoops itself doesn't expose serialize/restore, the bag
+    // is untouched by the rewind anyway, but explicit > implicit.
+    if (game._pluginState.whoops) {
+      game._pluginState.whoops.cooldown = COOLDOWN_LINES;
+    } else {
+      game._pluginState.whoops = { cooldown: COOLDOWN_LINES };
+    }
     game.onWhoops?.();
     return true;
   },

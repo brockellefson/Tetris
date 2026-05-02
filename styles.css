@@ -675,6 +675,53 @@ canvas { display: block; }
     inset 0 0 4px rgba(0, 245, 255, 0.1);
 }
 
+/* Cooldown variant of the blessing tag.
+   Used by Chisel / Fill / Whoops between a cast and the line-clear
+   that releases them. The tag keeps the same shape and label as the
+   normal blessing tag, but desaturates everything to gray (read:
+   "this isn't usable yet") and overlays a left-to-right progress
+   fill that grows 20% per cleared line. At 100% (which is the
+   moment the cooldown drains to 0), the cooldown class is removed
+   and the tag flips back to its normal cyan styling — so the player
+   never actually sees a fully-filled gray tag, the fill just grows
+   into the next state. The width transition smooths each tick. */
+.blessing-tag.cooldown {
+  position: relative;
+  overflow: hidden;
+  /* Pure gray to read as "disabled / cooling." All three of color,
+     border, text-shadow, box-shadow, and background drop their neon
+     accent so the tag visibly recedes next to its sibling tags. */
+  color: #888;
+  background: rgba(255, 255, 255, 0.04);
+  border-color: #555;
+  text-shadow: none;
+  box-shadow:
+    0 0 4px rgba(120, 120, 120, 0.3),
+    inset 0 0 4px rgba(255, 255, 255, 0.04);
+}
+
+.blessing-tag.cooldown .cd-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  height: 100%;
+  /* Soft cyan-tinted fill so the "filling toward ready" reads as a
+     return to the active cyan style. Subtle gradient + inner glow
+     sells the synthwave palette without overpowering the gray
+     surround. */
+  background: linear-gradient(90deg,
+    rgba(0, 245, 255, 0.18) 0%,
+    rgba(0, 245, 255, 0.32) 100%);
+  box-shadow: inset 0 0 6px rgba(0, 245, 255, 0.25);
+  transition: width 0.35s ease-out;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.blessing-tag.cooldown .cd-label {
+  position: relative;
+  z-index: 1;
+}
+
 /* ============================================================
    Active curse indicators (under the score panel)
    ============================================================ */

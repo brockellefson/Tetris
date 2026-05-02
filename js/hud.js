@@ -35,6 +35,8 @@
 //   hud.hideOverlay()           — clear the center overlay
 // ============================================================
 
+import { COOLDOWN_LINES } from './constants.js';
+
 export function setupHUD() {
   // ---- DOM lookups ----
   const overlay$       = document.getElementById('overlay');
@@ -135,38 +137,79 @@ export function setupHUD() {
   // Charge-based blessings show their charge count when > 1. One-shot
   // consumables (Mercy, Tired, Gravity, Dispell) are intentionally
   // omitted — they vanish on apply and there's nothing ongoing to tag.
+  //
+  // Three modal-spend power-ups (Chisel, Fill, Whoops) carry a
+  // per-cast cooldown — N more lines must clear before another cast
+  // is allowed. When a cooldown is active, this surface emits a
+  // dedicated "<NAME> CD k/5" tag with a progress fill instead of
+  // (or alongside) the standard blessing tag, so the player can
+  // watch the timer drain while they keep playing.
+  //
+  // Tags are encoded as {key, html} pairs so the diff cache (which
+  // compares the joined keys) skips repaints when only the per-tag
+  // text is unchanged. The progress-fill width is part of the key,
+  // so a cooldown ticking from 4/5 → 3/5 still rerenders.
+  //
+  // Visual treatment for a cooldown: plain name (no "CD k/5"), gray
+  // border/text, with a horizontal fill that grows 20% per cleared
+  // line from left to right. At cooldown = 0 (after the 5th clear)
+  // the cooldown tag is dropped entirely and the standard cyan
+  // blessing tag takes over (or no tag at all if charges are also
+  // 0). The fill width tracks progress, NOT remaining, so the bar
+  // visually pushes toward "ready."
+  function cooldownTag(name, remaining) {
+    const done = COOLDOWN_LINES - remaining;
+    const pct = Math.max(0, Math.min(100, Math.round((done / COOLDOWN_LINES) * 100)));
+    const key = `${name}CD${remaining}`;
+    const html = (
+      `<span class="blessing-tag cooldown" title="${name} cooling down — ${remaining} more line${remaining === 1 ? '' : 's'} until ready">` +
+        `<span class="cd-fill" style="width:${pct}%"></span>` +
+        `<span class="cd-label">${name}</span>` +
+      `</span>`
+    );
+    return { key, html };
+  }
+  function plainTag(text) {
+    return { key: text, html: `<span class="blessing-tag">${text}</span>` };
+  }
+
   function syncBlessings(game) {
     const tags = [];
-    if (game.unlocks.hold)  tags.push('HOLD');
-    if (game.unlocks.ghost) tags.push('GHOST');
-    if (game.unlocks.slick) tags.push('SLICK');
+    if (game.unlocks.hold)  tags.push(plainTag('HOLD'));
+    if (game.unlocks.ghost) tags.push(plainTag('GHOST'));
+    if (game.unlocks.slick) tags.push(plainTag('SLICK'));
     if (game.unlocks.nextCount > 0) {
-      tags.push(game.unlocks.nextCount > 1
+      tags.push(plainTag(game.unlocks.nextCount > 1
         ? `PSYCHIC ×${game.unlocks.nextCount}`
-        : 'PSYCHIC');
+        : 'PSYCHIC'));
     }
-    if (game.unlocks.chiselCharges > 0) {
-      tags.push(game.unlocks.chiselCharges > 1
-        ? `CHISEL ×${game.unlocks.chiselCharges}`
-        : 'CHISEL');
+    // Chisel / Fill / Flip / Whoops are unlock-once abilities: once
+    // picked, the unlock flag stays true for the rest of the run
+    // and the tag is always shown — either as a normal cyan "ready"
+    // tag, or as the gray cooldown variant with a left-to-right
+    // progress fill while the per-cast cooldown drains.
+    if (game.unlocks.chisel) {
+      const cd = game._pluginState.chisel?.cooldown ?? 0;
+      tags.push(cd > 0 ? cooldownTag('CHISEL', cd) : plainTag('CHISEL'));
     }
-    if (game.unlocks.fillCharges > 0) {
-      tags.push(game.unlocks.fillCharges > 1
-        ? `FILL ×${game.unlocks.fillCharges}`
-        : 'FILL');
+    if (game.unlocks.fill) {
+      const cd = game._pluginState.fill?.cooldown ?? 0;
+      tags.push(cd > 0 ? cooldownTag('FILL', cd) : plainTag('FILL'));
     }
-    if (game.unlocks.flipCharges > 0) {
-      tags.push(game.unlocks.flipCharges > 1
-        ? `FLIP ×${game.unlocks.flipCharges}`
-        : 'FLIP');
+    if (game.unlocks.flip) {
+      const cd = game._pluginState.flip?.cooldown ?? 0;
+      tags.push(cd > 0 ? cooldownTag('FLIP', cd) : plainTag('FLIP'));
     }
-    if (game.unlocks.whoopsCharges > 0) tags.push('WHOOPS');
+    if (game.unlocks.whoops) {
+      const cd = game._pluginState.whoops?.cooldown ?? 0;
+      tags.push(cd > 0 ? cooldownTag('WHOOPS', cd) : plainTag('WHOOPS'));
+    }
 
     blessingSection$.classList.toggle('hidden', tags.length === 0);
-    const next = tags.join(',');
+    const next = tags.map(t => t.key).join(',');
     if (blessingList$.dataset.tags !== next) {
       blessingList$.dataset.tags = next;
-      blessingList$.innerHTML = tags.map(t => `<span class="blessing-tag">${t}</span>`).join('');
+      blessingList$.innerHTML = tags.map(t => t.html).join('');
     }
   }
 

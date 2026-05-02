@@ -251,21 +251,18 @@ export class Game {
       // letting the player make split-second adjustments. The timer
       // itself lives on `lockDelayTimer` below.
       slick:     false,
-      // Chisel / Fill are banked consumables. Picking the power-up
-      // adds a charge here (capped at MAX_*_CHARGES); pressing A / S
-      // spends one to enter the cell-pick interaction. Charges persist
-      // across pieces and clears so the player can save them for the
-      // exact wrong-block moment that needs them.
-      chiselCharges: 0,
-      fillCharges: 0,
-      // Flip — banked horizontal mirror of the active piece.
-      // Pressing F spends one. Capped at MAX_FLIP_CHARGES.
-      flipCharges: 0,
-      // Whoops — banked one-shot rewind of the active piece. Pressing
-      // W restores the world to just before the current piece spawned
-      // (board, score, queue, hold, combo, level, pendingChoices, etc.)
-      // and respawns that piece type fresh. Capped at MAX_WHOOPS_CHARGES.
-      whoopsCharges: 0,
+      // Chisel / Fill / Whoops / Flip — unlock-once modal abilities.
+      // Picking the power-up flips the corresponding flag to true;
+      // the ability stays unlocked for the rest of the run. Each
+      // cast arms a per-ability cooldown stored in
+      // `_pluginState.<id>.cooldown` (see constants.js /
+      // COOLDOWN_LINES) — that gates how often the player can
+      // recast, NOT a charge counter. The card stops appearing in
+      // the choice menu once unlocked.
+      chisel:    false,
+      fill:      false,
+      whoops:    false,
+      flip:      false,
     };
     // (Whoops snapshot state — prePieceSnapshot / whoopsSnapshot —
     // used to live here. It now lives as module-level state inside
