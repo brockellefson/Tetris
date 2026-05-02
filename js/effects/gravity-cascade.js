@@ -22,13 +22,14 @@
 //   default export              plugin object — register from main.js
 //                               so freezesGameplay / tick fire each frame
 //
-// The state slot (`game.gravity = { active, savedPiece, phase,
-// stepTimer }`) lives on Game so the renderer can read it (it hides
-// `current` while active so falling locked blocks don't visually
-// pass through the parked piece). All mutations flow through this
-// file.
+// The state slot lives in the generic plugin-state bag at
+// `game._pluginState.gravity = { active, savedPiece, phase,
+// stepTimer }`, seeded by this plugin's reset hook. The renderer
+// reads it from the bag so it can hide `current` while a cascade is
+// running (otherwise falling locked blocks would visually pass
+// through the parked piece). All mutations flow through this file.
 //
-// Phases (driven by `game.gravity.phase`):
+// Phases (driven by `game._pluginState.gravity.phase`):
 //   'fall'      — accumulate dt; each GRAVITY_POWER_STEP ms run one
 //                 step that drops every floating block by one row
 //                 (bottom-up so the cascade has a visible "rain"
@@ -51,22 +52,27 @@ import {
 } from '../constants.js';
 import { collides, findFullRows, removeRows } from '../board.js';
 
+// Convenience accessor — slot lives in the plugin-state bag, seeded
+// by this plugin's reset hook.
+const gs = (game) => game._pluginState.gravity;
+
 // Begin the gravity cascade. Idempotent — refuses to re-enter if a
 // sequence is already running. The active piece is moved into
-// `gravity.savedPiece` and `current` is cleared so the renderer hides
-// it for the duration (otherwise falling locked blocks would visually
-// pass through the piece's silhouette).
+// `savedPiece` and `current` is cleared so the renderer hides it for
+// the duration (otherwise falling locked blocks would visually pass
+// through the piece's silhouette).
 export function startGravityCascade(game) {
-  if (game.gravity.active) return;
-  game.gravity.active     = true;
-  game.gravity.savedPiece = game.current;
-  game.current            = null;
-  game.gravity.phase      = 'fall';
-  game.gravity.stepTimer  = 0;
+  const s = gs(game);
+  if (!s || s.active) return;
+  s.active     = true;
+  s.savedPiece = game.current;
+  game.current = null;
+  s.phase      = 'fall';
+  s.stepTimer  = 0;
   // Cancel any in-flight Slick lock-delay window — there's no active
   // piece for it to apply to during the cascade.
-  game.lockDelayTimer     = 0;
-  game.dropTimer          = 0;
+  game.lockDelayTimer = 0;
+  game.dropTimer      = 0;
 }
 
 // Perform one fall step over the locked-block grid. Every cell that
@@ -80,13 +86,15 @@ export function startGravityCascade(game) {
 // cascade its visible "rain" cadence; without it the board would
 // resolve in a single frame.
 //
-// Critically, this also moves any matching cell in `boardSpecials` so
-// special-tagged blocks fall in lock-step with their underlying cell
-// — otherwise a falling block would shed its special on takeoff.
+// Critically, this also moves any matching cell in the specials
+// boardGrid so special-tagged blocks fall in lock-step with their
+// underlying cell — otherwise a falling block would shed its special
+// on takeoff. The specials grid is owned by the specials plugin
+// (in its plugin-state bag); we just read it here.
 function fallStep(game) {
   const rows = game.board.length;
   const cols = game.board[0]?.length ?? 10;
-  const specials = game.boardSpecials;
+  const specials = game._pluginState.specials?.boardGrid ?? null;
   let moved = false;
   for (let r = rows - 2; r >= 0; r--) {
     for (let c = 0; c < cols; c++) {
@@ -144,7 +152,7 @@ function completeCascadeClear(game) {
 
   // Roguelite power-up milestones — same rule as completeClear().
   // The choice menu won't surface until endCascade() fires the
-  // onGravityComplete hook, so any picks earned mid-cascade queue up
+  // onPluginIdle transition, so any picks earned mid-cascade queue up
   // cleanly behind the animation.
   let milestonesEarned =
     Math.floor(game.lines / 5) - Math.floor(linesBefore / 5);
@@ -160,8 +168,9 @@ function completeCascadeClear(game) {
 
   game.clearingRows = [];
   game.clearTimer = 0;
-  game.gravity.phase     = 'fall';
-  game.gravity.stepTimer = 0;
+  const s = gs(game);
+  s.phase     = 'fall';
+  s.stepTimer = 0;
   // Specials' onClear fires their triggers BEFORE the power-up menu
   // callback so any freezing plugin they start gets a chance to flip
   // its gate first — same ordering rule completeClear() uses. A
@@ -192,16 +201,17 @@ function completeCascadeClear(game) {
 //                        completeClear deferred its own spawnNext to
 //                        let us own the resume here.
 function endCascade(game) {
-  game.gravity.active = false;
-  if (game.gravity.savedPiece) {
-    game.current = game.gravity.savedPiece;
-    game.gravity.savedPiece = null;
+  const s = gs(game);
+  s.active = false;
+  if (s.savedPiece) {
+    game.current = s.savedPiece;
+    s.savedPiece = null;
     if (collides(game.board, game.current)) {
       game.gameOver = true;
     }
   }
-  game.gravity.phase     = 'fall';
-  game.gravity.stepTimer = 0;
+  s.phase     = 'fall';
+  s.stepTimer = 0;
   // Reset gravity-drop accumulator so the restored piece doesn't
   // immediately fall a row from leftover dt collected pre-cascade.
   game.dropTimer = 0;
@@ -212,8 +222,9 @@ function endCascade(game) {
   if (!game.current && !game.gameOver) {
     game.spawnNext();
   }
-  // Lets main.js re-open any choice menu deferred by the cascade.
-  game.onGravityComplete?.();
+  // No explicit completion callback — game.onPluginIdle fires on
+  // the next tick when freezesGameplay sees this plugin settle
+  // (active = false), letting main.js resume any deferred menu.
 }
 
 // The plugin object — wires the engine into Game's lifecycle bus.
@@ -221,18 +232,23 @@ function endCascade(game) {
 // twice is a no-op (Game just appends, but the second registration
 // would double-tick the cascade).
 export default {
-  // Reset module-bound state on every Game.reset(). The state slot
-  // itself lives on Game, but if the player restarts mid-cascade the
-  // savedPiece reference would otherwise be silently dropped into
-  // garbage. Game.reset() reinitializes game.gravity wholesale, so
-  // this hook is only needed if we later add module-scoped state.
-  reset() {},
+  // Seed the gravity slot in the plugin-state bag on every
+  // Game.reset(). Owns the slot's lifetime; nothing else writes here.
+  reset(game) {
+    game._pluginState.gravity = {
+      active: false,
+      savedPiece: null,
+      phase: 'fall',
+      stepTimer: 0,
+    };
+  },
 
-  freezesGameplay: (game) => game.gravity.active,
+  freezesGameplay: (game) => !!gs(game)?.active,
 
   tick: (game, dt) => {
-    if (!game.gravity.active) return;
-    if (game.gravity.phase === 'clearing') {
+    const s = gs(game);
+    if (!s?.active) return;
+    if (s.phase === 'clearing') {
       game.clearTimer += dt;
       if (game.clearTimer >= CLEAR_DURATION) completeCascadeClear(game);
       return;
@@ -240,9 +256,9 @@ export default {
     // 'fall' phase — accumulate dt and run a step each time the step
     // interval elapses. A single dt slice can span multiple steps (low
     // frame rate), so loop until we're back under it.
-    game.gravity.stepTimer += dt;
-    while (game.gravity.stepTimer >= GRAVITY_POWER_STEP) {
-      game.gravity.stepTimer -= GRAVITY_POWER_STEP;
+    s.stepTimer += dt;
+    while (s.stepTimer >= GRAVITY_POWER_STEP) {
+      s.stepTimer -= GRAVITY_POWER_STEP;
       const moved = fallStep(game);
       if (!moved) {
         // Cascade settled. Any full rows? If so kick off the standard
@@ -250,9 +266,9 @@ export default {
         // fall loop after the animation finishes.
         const fullRows = findFullRows(game.board);
         if (fullRows.length > 0) {
-          game.clearingRows  = fullRows;
-          game.clearTimer    = 0;
-          game.gravity.phase = 'clearing';
+          game.clearingRows = fullRows;
+          game.clearTimer   = 0;
+          s.phase           = 'clearing';
           game.onLineClear?.(fullRows.length);
         } else {
           endCascade(game);

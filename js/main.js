@@ -82,7 +82,7 @@ const debug = setupDebug(game);
 
 // Register lifecycle plugins. Order matters in one place: the
 // specials plugin must register BEFORE the gravity cascade so its
-// `reset` hook initializes `game.boardSpecials` before any other
+// `reset` hook initializes `_pluginState.specials.boardGrid` before any other
 // hook reads it. (Game.reset() also seeds boardSpecials defensively
 // in case main.js wires plugins in a different order someday.)
 game.registerPlugin(specialsPlugin);
@@ -112,13 +112,16 @@ game.onFlip         = playFlipSound;
 game.onCombo        = (n)   => hud.notify(`COMBO × ${n}`, 'combo');
 game.onTetris       = (b2b) => hud.notify(b2b ? 'BACK-TO-BACK TETRIS' : 'TETRIS', b2b ? 'b2b' : 'tetris', 1900);
 game.onPerfectClear = ()    => hud.notify('PERFECT CLEAR', 'perfect', 2100);
-// Power-up choice menu surfacing. Chisel / Fill / Gravity defer the
-// menu until their animation completes, so each fires its own
-// "okay, queue is clear" hook and we re-check via showNext().
-game.onPowerUpChoice    = () => powerupMenu.showNext();
-game.onChiselComplete   = () => powerupMenu.showNext();
-game.onFillComplete     = () => powerupMenu.showNext();
-game.onGravityComplete  = () => powerupMenu.showNext();
+// Power-up choice menu surfacing. Two callbacks feed showNext:
+//   onPowerUpChoice — fired when a milestone earns a new pick.
+//   onPluginIdle    — fired by Game when "any plugin freezing OR
+//                     mid-clear" transitions to "everything settled."
+//                     This single hook covers what used to be three
+//                     named completion callbacks (onChiselComplete /
+//                     onFillComplete / onGravityComplete) — adding a
+//                     new modal plugin gets menu-resume for free.
+game.onPowerUpChoice = () => powerupMenu.showNext();
+game.onPluginIdle    = () => powerupMenu.showNext();
 // Curse FX notifications — the row drop / rain spray would feel
 // silent without a blip, so we surface a small notification.
 game.onJunk = (n) => hud.notify(n > 1 ? `JUNK +${n}` : 'JUNK', 'b2b', 1400);
@@ -343,11 +346,12 @@ function frame(now) {
   // EXCEPT when the held piece carries a special, in which case the
   // cycling palette has to animate every frame just like the special
   // does on the board. The cache is bypassed by always-redrawing
-  // when game.holdSpecials is non-null; the type-change check still
+  // when held specials are non-null; the type-change check still
   // covers the common no-special case.
-  const holdHasSpecial = !!(game.holdSpecials && game.holdSpecials.length > 0);
+  const heldSpecials = game._pluginState.specials?.holdSpecials ?? null;
+  const holdHasSpecial = !!(heldSpecials && heldSpecials.length > 0);
   if (_lastHold !== game.hold || holdHasSpecial) {
-    drawMini(hold$, holdCtx, game.hold, game.holdSpecials);
+    drawMini(hold$, holdCtx, game.hold, heldSpecials);
     _lastHold = game.hold;
   }
   for (let i = 0; i < nextCanvases.length; i++) {

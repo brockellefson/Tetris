@@ -82,7 +82,8 @@ export function setupInput(game, callbacks = {}) {
     // bails while chisel is active), so pendingChoices can still be > 0
     // here even though no modal is on screen — and we still need to
     // handle keys.
-    if (game.chisel.active || game.chisel.target) {
+    const chiselS = game._pluginState.chisel;
+    if (chiselS?.active || chiselS?.target) {
       // R (restart) still works so a stuck player can recover.
       if (e.key === 'r' || e.key === 'R') {
         e.preventDefault();
@@ -91,7 +92,7 @@ export function setupInput(game, callbacks = {}) {
         return;
       }
       // Cursor-driven selection only applies while we're awaiting a pick.
-      if (game.chisel.active) {
+      if (chiselS?.active) {
         switch (e.key) {
           case 'ArrowLeft':
           case 'a': case 'A':
@@ -120,7 +121,7 @@ export function setupInput(game, callbacks = {}) {
             return;
           case 'Escape':
             // Cancel the pick — the plugin refunds the charge and
-            // fires onChiselComplete so the menu queue resumes.
+            // fires onPluginIdle on the next tick so the menu queue resumes.
             e.preventDefault();
             game._interceptInput('cursor:cancel');
             return;
@@ -133,14 +134,15 @@ export function setupInput(game, callbacks = {}) {
     // inert while fill.active or fill.target is set, and the
     // arrow / WASD cursor dispatches the same generic 'cursor:*'
     // actions chisel uses — only the active plugin claims them.
-    if (game.fill.active || game.fill.target) {
+    const fillS = game._pluginState.fill;
+    if (fillS?.active || fillS?.target) {
       if (e.key === 'r' || e.key === 'R') {
         e.preventDefault();
         game.start();
         callbacks.onStart?.();
         return;
       }
-      if (game.fill.active) {
+      if (fillS?.active) {
         switch (e.key) {
           case 'ArrowLeft':
           case 'a': case 'A':
@@ -169,7 +171,7 @@ export function setupInput(game, callbacks = {}) {
             return;
           case 'Escape':
             // Cancel the pick — the plugin refunds the charge and
-            // fires onFillComplete so the menu queue resumes.
+            // fires onPluginIdle on the next tick so the menu queue resumes.
             e.preventDefault();
             game._interceptInput('cursor:cancel');
             return;

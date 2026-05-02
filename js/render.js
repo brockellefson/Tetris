@@ -391,10 +391,12 @@ export function drawBoard(ctx, canvas, game) {
   // animation passes that want a stable per-frame clock).
   const tNow = (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
-  // locked blocks — dispatch to the special painter when boardSpecials
-  // tags the cell. Specials replace the underlying piece color; the
-  // standard sprite-cached path stays the hot path for everything else.
-  const specials = game.boardSpecials;
+  // locked blocks — dispatch to the special painter when the specials
+  // plugin tags the cell. Specials replace the underlying piece color;
+  // the standard sprite-cached path stays the hot path for everything
+  // else. The grid lives in the plugin-state bag, owned by the
+  // specials plugin's reset hook.
+  const specials = game._pluginState.specials?.boardGrid;
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < cols; c++) {
       if (!game.board[r][c]) continue;
@@ -418,27 +420,31 @@ export function drawBoard(ctx, canvas, game) {
     }
   }
 
-  // Chisel destruction animation (drawn on top of the locked blocks)
-  if (game.chisel?.target) {
-    drawChiselShatter(ctx, game.chisel.target, game.chiselProgress());
+  // Chisel destruction animation (drawn on top of the locked blocks).
+  // Reads chisel state from the plugin-state bag — owned by
+  // js/powerups/chisel.js, which seeds the slot in its reset hook.
+  const chiselState = game._pluginState.chisel;
+  if (chiselState?.target) {
+    drawChiselShatter(ctx, chiselState.target, game.chiselProgress());
   }
 
   // Fill materialize animation (the new FILL cell is already drawn
   // by the locked-blocks pass above; this just adds the FX overlay).
-  if (game.fill?.target) {
-    drawFillShimmer(ctx, game.fill.target, game.fillProgress());
+  const fillState = game._pluginState.fill;
+  if (fillState?.target) {
+    drawFillShimmer(ctx, fillState.target, game.fillProgress());
   }
 
   if (!game.current || game.gameOver) {
     // Still paint the chisel/fill cursor highlight even when there's
     // no active piece (e.g. between spawns). Late-return path.
-    if (game.chisel?.active && game.chisel.cursor) {
-      const onBlock = !!game.board[game.chisel.cursor.y]?.[game.chisel.cursor.x];
-      drawChiselCursor(ctx, game.chisel.cursor, onBlock);
+    if (chiselState?.active && chiselState.cursor) {
+      const onBlock = !!game.board[chiselState.cursor.y]?.[chiselState.cursor.x];
+      drawChiselCursor(ctx, chiselState.cursor, onBlock);
     }
-    if (game.fill?.active && game.fill.cursor) {
-      const onEmpty = !game.board[game.fill.cursor.y]?.[game.fill.cursor.x];
-      drawFillCursor(ctx, game.fill.cursor, onEmpty);
+    if (fillState?.active && fillState.cursor) {
+      const onEmpty = !game.board[fillState.cursor.y]?.[fillState.cursor.x];
+      drawFillCursor(ctx, fillState.cursor, onEmpty);
     }
     return;
   }
@@ -483,21 +489,21 @@ export function drawBoard(ctx, canvas, game) {
 
   // Chisel keyboard-cursor highlight — drawn LAST so it sits on top
   // of every piece and overlay. Only painted while awaiting a pick.
-  if (game.chisel?.active && game.chisel.cursor) {
-    const onBlock = !!game.board[game.chisel.cursor.y]?.[game.chisel.cursor.x];
-    drawChiselCursor(ctx, game.chisel.cursor, onBlock);
+  if (chiselState?.active && chiselState.cursor) {
+    const onBlock = !!game.board[chiselState.cursor.y]?.[chiselState.cursor.x];
+    drawChiselCursor(ctx, chiselState.cursor, onBlock);
   }
 
   // Fill keyboard-cursor highlight — same drawn-last rule. Fill is
   // the inverse of chisel: green when the cursor is on an empty cell
   // (Enter will fill it), red when over a filled cell or a cell
   // currently occupied by the active piece.
-  if (game.fill?.active && game.fill.cursor) {
-    const cx = game.fill.cursor.x;
-    const cy = game.fill.cursor.y;
+  if (fillState?.active && fillState.cursor) {
+    const cx = fillState.cursor.x;
+    const cy = fillState.cursor.y;
     const onFilled = !!game.board[cy]?.[cx];
     const onPiece  = game.isCellUnderActivePiece?.(cx, cy) ?? false;
-    drawFillCursor(ctx, game.fill.cursor, !onFilled && !onPiece);
+    drawFillCursor(ctx, fillState.cursor, !onFilled && !onPiece);
   }
 }
 

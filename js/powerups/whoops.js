@@ -59,28 +59,23 @@ let whoopsSnapshot   = null;
 let heldDuringSwap = null;
 
 function captureSnapshot(game) {
+  // Engine-level state Whoops always captures by name — these are
+  // the canonical "world" fields that don't belong to any plugin.
+  // Per-plugin state is captured generically via the serialize hook
+  // below, so a new plugin's state automatically survives a Whoops
+  // rewind without Whoops needing to know about it.
+  const plugins = {};
+  for (const p of game._plugins) {
+    if (p.id && typeof p.serialize === 'function') {
+      plugins[p.id] = p.serialize(game);
+    }
+  }
   return {
     board:              game.board.map(row => row.slice()),
-    // Mirror of `board` for the special-block tags. Deep-copied so a
-    // later mutation can't alias the snapshot. The active piece's own
-    // `specials` field is intentionally NOT preserved — restore goes
-    // through spawnNext, which re-rolls decoratePiece, so the
-    // respawned piece may carry a different special (or none). That's
-    // by design: rewinding shouldn't lock in a known-good roll.
-    boardSpecials:      game.boardSpecials
-                          ? game.boardSpecials.map(row => row.slice())
-                          : null,
     // Pre-shift queue: prepend the just-spawned piece type so
     // restore + spawnNext() reproduces the exact same draw order.
     queue:              [game.current.type, ...game.queue],
     hold:               game.hold,
-    // Hold's specials slot — preserved alongside `hold` so a rewind
-    // brings back not just the held piece type but its tagged mino.
-    // Deep-cloned so later mutations on the live array can't alias
-    // the snapshot.
-    holdSpecials:       game.holdSpecials
-                          ? game.holdSpecials.map(s => ({ ...s }))
-                          : null,
     canHold:            game.canHold,
     score:              game.score,
     lines:              game.lines,
@@ -89,6 +84,7 @@ function captureSnapshot(game) {
     lastClearWasTetris: game.lastClearWasTetris,
     firstClearAwarded:  game.firstClearAwarded,
     pendingChoices:     game.pendingChoices,
+    plugins,
   };
 }
 
@@ -158,15 +154,19 @@ export default {
     // capture; copy again on restore so later mutations don't alias
     // the snapshot.
     game.board              = s.board.map(row => row.slice());
-    if (s.boardSpecials) {
-      game.boardSpecials = s.boardSpecials.map(row => row.slice());
-    }
     game.queue              = s.queue.slice();
     game.hold               = s.hold;
-    game.holdSpecials       = s.holdSpecials
-                                ? s.holdSpecials.map(sp => ({ ...sp }))
-                                : null;
     game.canHold            = s.canHold;
+    // Per-plugin state — generic restore loop. Each plugin that
+    // exposed serialize() also exposes restore(); we hand it the
+    // captured snap and let it deep-copy as it sees fit.
+    if (s.plugins) {
+      for (const p of game._plugins) {
+        if (p.id && typeof p.restore === 'function' && p.id in s.plugins) {
+          p.restore(game, s.plugins[p.id]);
+        }
+      }
+    }
     game.score              = s.score;
     game.lines              = s.lines;
     game.level              = s.level;
@@ -182,7 +182,7 @@ export default {
     game.clearTimer = 0;
     // Same for fill.savedPiece — if the rewind cancels a fill-
     // triggered clear, there's no saved piece to restore later.
-    if (game.fill) game.fill.savedPiece = null;
+    if (game._pluginState.fill) game._pluginState.fill.savedPiece = null;
     // Bring the run back from the dead if the collision happened
     // on the spawn following the undone lock.
     game.gameOver = false;

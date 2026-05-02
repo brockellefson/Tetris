@@ -8,13 +8,16 @@
 //      card just bumps `game.unlocks.fillCharges`; the heavy
 //      interaction lives in the lifecycle hooks below.
 //
-//   2. Lifecycle plugin (freezesGameplay, tick, interceptInput) —
-//      registered on the Game in main.js. The fill state slot
-//      (`game.fill = { active, target, cursor, savedPiece }`) still
-//      lives on Game so the renderer / chisel-hint UI can read it
-//      directly, but every mutation flows through this file.
+//   2. Lifecycle plugin (freezesGameplay, tick, interceptInput,
+//      reset) — registered on the Game in main.js. The fill state
+//      slot lives in the generic plugin-state bag at
+//      `game._pluginState.fill = { active, target, cursor, savedPiece }`,
+//      seeded by this plugin's reset hook. Renderer/UI read it from
+//      the bag; every mutation flows through this file. completeClear
+//      reaches into savedPiece via the bag to restore the active
+//      piece across a fill-triggered clear.
 //
-// Interaction phases (driven by `game.fill`):
+// Interaction phases (driven by `game._pluginState.fill`):
 //   active = true                  — waiting for the player to pick a
 //                                    cell. freezesGameplay is true.
 //                                    Click or Enter on an empty cell
@@ -44,6 +47,10 @@
 import { FILL_DURATION, MAX_FILL_CHARGES } from '../constants.js';
 import { findFullRows } from '../board.js';
 
+// Convenience accessor — slot is initialized in reset() so it's
+// always present once the game has started.
+const fs = (game) => game._pluginState.fill;
+
 function clampCursor(game, x, y) {
   const cols = game.board[0]?.length ?? 10;
   const rows = game.board.length;
@@ -58,58 +65,63 @@ function clampCursor(game, x, y) {
 // complete a line), so starting low minimizes travel. Falls back to
 // the spawn area if the board is somehow completely full.
 function initCursor(game) {
+  const s = fs(game);
   const cols = game.board[0]?.length ?? 10;
   for (let r = game.board.length - 1; r >= 0; r--) {
     for (let c = 0; c < cols; c++) {
       if (!game.board[r][c]) {
-        game.fill.cursor = { x: c, y: r };
+        s.cursor = { x: c, y: r };
         return;
       }
     }
   }
-  game.fill.cursor = { x: 0, y: 0 };
+  s.cursor = { x: 0, y: 0 };
 }
 
 function moveCursor(game, dx, dy) {
-  if (!game.fill.active || !game.fill.cursor) return;
-  const cur = game.fill.cursor;
+  const s = fs(game);
+  if (!s.active || !s.cursor) return;
+  const cur = s.cursor;
   const next = clampCursor(game, cur.x + dx, cur.y + dy);
   const moved = next.x !== cur.x || next.y !== cur.y;
-  game.fill.cursor = next;
+  s.cursor = next;
   if (moved) game.onCursorMove?.();
 }
 
 // Player picked an empty cell to fill. Returns true on success
 // (refused cells leave state unchanged so the UI can ignore the
 // click). The block is written to the board immediately as type
-// 'FILL'; the timer on fill.target only drives the materialize visual.
+// 'FILL'; the timer on the target only drives the materialize visual.
 function selectCell(game, x, y) {
-  if (!game.fill.active) return false;
+  const s = fs(game);
+  if (!s.active) return false;
   if (x < 0 || x >= game.board[0].length || y < 0 || y >= game.board.length) return false;
   if (game.board[y][x]) return false;                 // already filled
   if (game.isCellUnderActivePiece(x, y)) return false; // would trap the active piece
   game.board[y][x] = 'FILL';
-  game.fill.active = false;
-  game.fill.cursor = null;
-  game.fill.target = { x, y, timer: 0 };
+  s.active = false;
+  s.cursor = null;
+  s.target = { x, y, timer: 0 };
   game.onFillHit?.();
   return true;
 }
 
 // Called when the materialize animation completes. Either kicks off
 // the standard line-clear flow (preserving the active piece via
-// fill.savedPiece) or signals the menu queue to resume.
+// savedPiece) or signals the menu queue to resume.
 function completeFill(game) {
-  game.fill.target = null;
+  const s = fs(game);
+  s.target = null;
   const fullRows = findFullRows(game.board);
   if (fullRows.length === 0) {
-    game.onFillComplete?.();
+    // No clear → fill is fully done. game.onPluginIdle fires on the
+    // next tick when freezesGameplay sees s.target === null.
     return;
   }
   // Hand off to the standard clear flow. Hide the current piece so
   // completeClear()'s spawnNext() doesn't fire on an active piece;
-  // we'll restore it from fill.savedPiece in completeClear().
-  game.fill.savedPiece = game.current;
+  // we'll restore it from savedPiece in completeClear().
+  s.savedPiece = game.current;
   game.current = null;
   game.clearingRows = fullRows;
   game.clearTimer = 0;
@@ -117,17 +129,18 @@ function completeFill(game) {
 }
 
 function activate(game) {
+  const s = fs(game);
   if (!game.started) return false;
   if (game.paused || game.gameOver) return false;
   if (game.pendingChoices > 0) return false;
   if (game.isClearing()) return false;
-  if (game.fill.active || game.fill.target) return false;
+  if (s.active || s.target) return false;
   if (game._isFrozenByPlugin()) return false;
   if (game.unlocks.fillCharges <= 0) return false;
   const hasEmpty = game.board.some(row => row.some(cell => cell === null));
   if (!hasEmpty) return false;
   game.unlocks.fillCharges -= 1;
-  game.fill.active = true;
+  s.active = true;
   initCursor(game);
   return true;
 }
@@ -146,49 +159,60 @@ export default {
 
   // ---- lifecycle hooks ----
 
-  freezesGameplay: (game) => game.fill.active || !!game.fill.target,
+  reset(game) {
+    game._pluginState.fill = { active: false, target: null, cursor: null, savedPiece: null };
+  },
+
+  freezesGameplay: (game) => {
+    const s = fs(game);
+    return !!s && (s.active || !!s.target);
+  },
 
   tick: (game, dt) => {
-    if (!game.fill.target) return;
-    game.fill.target.timer += dt;
-    if (game.fill.target.timer >= FILL_DURATION) {
+    const s = fs(game);
+    if (!s?.target) return;
+    s.target.timer += dt;
+    if (s.target.timer >= FILL_DURATION) {
       completeFill(game);
     }
   },
 
   interceptInput(game, action, ...args) {
+    const s = fs(game);
     switch (action) {
       case 'fill:activate':
         return activate(game);
       case 'cursor:left':
-        if (!game.fill.active) return false;
+        if (!s?.active) return false;
         moveCursor(game, -1, 0); return true;
       case 'cursor:right':
-        if (!game.fill.active) return false;
+        if (!s?.active) return false;
         moveCursor(game, 1, 0); return true;
       case 'cursor:up':
-        if (!game.fill.active) return false;
+        if (!s?.active) return false;
         moveCursor(game, 0, -1); return true;
       case 'cursor:down':
-        if (!game.fill.active) return false;
+        if (!s?.active) return false;
         moveCursor(game, 0, 1); return true;
       case 'cursor:confirm':
-        if (!game.fill.active || !game.fill.cursor) return false;
-        return selectCell(game, game.fill.cursor.x, game.fill.cursor.y);
+        if (!s?.active || !s.cursor) return false;
+        return selectCell(game, s.cursor.x, s.cursor.y);
       case 'cursor:cancel':
         // Bail out of an active pick. Symmetric with activate(): we
         // refund the charge that activate() decremented, drop the
         // active/cursor state, and notify main.js that the menu
         // queue can resume (a fill earned mid-clear may have a
         // power-up choice waiting behind it).
-        if (!game.fill.active) return false;
+        if (!s?.active) return false;
         game.unlocks.fillCharges += 1;
-        game.fill.active = false;
-        game.fill.cursor = null;
-        game.onFillComplete?.();
+        s.active = false;
+        s.cursor = null;
+        // No explicit completion callback — game.onPluginIdle fires
+        // on the next tick when freezesGameplay sees this plugin
+        // settle (active=false, target=null).
         return true;
       case 'boardClick': {
-        if (!game.fill.active) return false;
+        if (!s?.active) return false;
         const [col, row] = args;
         return selectCell(game, col, row);
       }

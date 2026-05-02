@@ -122,6 +122,14 @@ export class Game {
     return false;
   }
 
+  // True if the engine is mid-modal — any freezing plugin OR a clear
+  // animation. Used by the busy-transition tracker in tick() to fire
+  // onPluginIdle exactly once when everything settles. Replaces the
+  // need for individual plugins to fire named completion callbacks.
+  _isBusy() {
+    return this._isFrozenByPlugin() || this.isClearing();
+  }
+
   // Returns true if any plugin claimed the action. Extra args
   // (e.g. boardClick coords) are forwarded to the plugin.
   _interceptInput(action, ...args) {
@@ -158,22 +166,31 @@ export class Game {
   // -------- Lifecycle --------
 
   reset() {
+    // Generic plugin-state bag. Each plugin that owns mutable state
+    // claims a slot here (keyed by id) from its reset() hook. Replaces
+    // the per-feature named slots that used to live directly on Game
+    // (game.chisel, game.fill, game.gravity, …) — those grew linearly
+    // with each new modal feature and bloated Game's public surface.
+    //
+    // Initialized to {} here so renderer / HUD reads of
+    // `game._pluginState.chisel?.active` stay safe during the brief
+    // window between Game construction and the first plugin reset
+    // (registerPlugin fires init but not reset; reset only fires from
+    // game.start()'s reset() call after all plugins are registered).
+    this._pluginState = {};
+    // Edge-tracker for the busy → idle transition that fires
+    // game.onPluginIdle. Reset to false here so a fresh game doesn't
+    // spuriously fire onPluginIdle on its first tick.
+    this._wasBusy = false;
     this.board       = newBoard();
-    // Parallel-to-board grid storing the special-block tag for each
-    // cell, or null. Owned by the specials subsystem (js/specials/),
-    // but lives on Game so the renderer / Whoops snapshot can read
-    // it directly. Reinitialized here so a restart clears stale tags
-    // even before the specials plugin's reset() runs.
-    this.boardSpecials = newBoard();
+    // (boardSpecials and holdSpecials used to live as named slots on
+    // Game. Both are now owned by the specials plugin in its slot at
+    // `this._pluginState.specials.{boardGrid, holdSpecials}`, seeded
+    // by its reset hook. Renderer reads boardGrid via the bag;
+    // holdPiece preserves holdSpecials via the beforeHoldSwap /
+    // afterHoldSwap hooks the specials plugin subscribes to.)
     this.queue       = [];
     this.hold        = null;
-    // Mirrors the active piece's `specials` array for the held slot.
-    // `this.hold` stays a type letter so existing readers (HUD,
-    // drawMini, Whoops snapshot) keep working unchanged; this
-    // parallel slot preserves the special tag so a held special
-    // doesn't evaporate on swap. Reattached to the spawned piece in
-    // holdPiece's swap branch. Initialized to null on every reset.
-    this.holdSpecials = null;
     this.canHold     = true;
     this.current     = null;
     this.score       = 0;
@@ -270,50 +287,16 @@ export class Game {
       // pick-time cap in the curse's `available()` check.
       extraCols: 0,
     };
-    // Chisel power-up state.
-    //   active — set by the Chisel power-up's apply(); freezes gameplay
-    //            and tells the renderer/UI to await a block click.
-    //   target — once a block is picked, holds {x, y, type, timer} while
-    //            the destruction animation plays. The block is removed
-    //            from the board the instant it's picked; `type` is kept
-    //            around purely so the animation can use the right color.
-    //   cursor — {x, y} of the keyboard-driven block selector while
-    //            chisel.active. Free-roams the grid so the player can
-    //            navigate to any cell with arrow keys; only confirms
-    //            when the cell holds a block. Null when chisel is idle.
-    this.chisel = { active: false, target: null, cursor: null };
-    // Fill power-up state — a mirror of `chisel`, but for *placing* a
-    // block on an empty cell instead of removing one.
-    //   active      — gameplay is frozen waiting for the player to pick
-    //                 an empty cell. Renderer paints a hint + cursor.
-    //   target      — once a cell is picked, holds {x, y, timer} while
-    //                 the materialize animation plays. The block is
-    //                 written to the board the instant it's picked.
-    //   cursor      — {x, y} of the keyboard-driven cell selector.
-    //                 Free-roams just like chisel.cursor.
-    //   savedPiece  — when a fill placement *completes a line*, we
-    //                 hand off to the standard line-clear animation
-    //                 (which expects current === null and would normally
-    //                 spawnNext on completion). To preserve the active
-    //                 piece across a fill-triggered clear, we stash
-    //                 it here and have completeClear() restore it
-    //                 instead of spawning a fresh one.
-    this.fill = { active: false, target: null, cursor: null, savedPiece: null };
-    // Gravity power-up state — a one-shot board-compaction sequence.
-    //   active     — true while the cascade is running. Freezes player
-    //                input and the normal gravity drop in tick().
-    //   savedPiece — the active piece is hidden from the board for the
-    //                duration of the cascade (so falling locked blocks
-    //                don't visually pass through it). Restored to
-    //                `current` when the sequence ends.
-    //   phase      — 'fall' while we're stepping blocks downward,
-    //                'clearing' while a line-clear animation triggered
-    //                by the cascade plays. After a clear we loop back
-    //                to 'fall' to see if the now-shifted board can
-    //                drop further.
-    //   stepTimer  — accumulates dt; each time it crosses
-    //                GRAVITY_POWER_STEP we run one fall step.
-    this.gravity = { active: false, savedPiece: null, phase: 'fall', stepTimer: 0 };
+    // (Chisel state — active / target / cursor — used to live on
+    // `this.chisel` here. It now lives in the plugin-state bag at
+    // `this._pluginState.chisel`, initialized by chisel.js's reset
+    // hook. Renderer/HUD/menu read it via the bag.)
+    // (Fill state — active / target / cursor / savedPiece — and Gravity
+    // cascade state — active / savedPiece / phase / stepTimer — used
+    // to live on `this.fill` and `this.gravity` here. Both now live in
+    // the plugin-state bag at `this._pluginState.fill` and
+    // `this._pluginState.gravity`, seeded by their respective plugins'
+    // reset hooks.)
     this.refillQueue();
     // Plugins reset AFTER all the standard fields, so a plugin can read
     // the freshly-initialized board / queue / unlocks if it needs them.
@@ -408,15 +391,23 @@ export class Game {
   }
 
   // Chisel-shatter animation progress 0..1, or null if no target.
+  // Reads from the plugin-state bag — chisel.js's reset hook
+  // initializes the slot, so the optional-chain handles the brief
+  // pre-first-reset window safely.
   chiselProgress() {
-    if (!this.chisel.target) return null;
-    return Math.min(1, this.chisel.target.timer / CHISEL_DURATION);
+    const t = this._pluginState.chisel?.target;
+    if (!t) return null;
+    return Math.min(1, t.timer / CHISEL_DURATION);
   }
 
   // Fill-materialize animation progress 0..1, or null if no target.
+  // Reads from the plugin-state bag — fill.js's reset hook seeds the
+  // slot, so the optional-chain handles the brief pre-first-reset
+  // window safely.
   fillProgress() {
-    if (!this.fill.target) return null;
-    return Math.min(1, this.fill.target.timer / FILL_DURATION);
+    const t = this._pluginState.fill?.target;
+    if (!t) return null;
+    return Math.min(1, t.timer / FILL_DURATION);
   }
 
   start() {
@@ -523,39 +514,24 @@ export class Game {
     if (!this.current || !this.canHold) return;
     if (!this.unlocks.hold) return; // gated behind a power-up
     const t = this.current.type;
-    // Capture specials BEFORE we overwrite this.current. The held
-    // piece preserves its tagged mino through the swap so a special
-    // doesn't evaporate when the player parks the piece. Cloned so
-    // later mutations on the original array can't alias the held
-    // copy.
-    const specials = this.current.specials
-      ? this.current.specials.map(s => ({ ...s }))
-      : null;
+    // beforeHoldSwap / afterHoldSwap fire on BOTH branches now —
+    // plugins use the bracket to preserve per-piece decorations
+    // (the specials plugin moves a tagged mino's metadata in/out
+    // of its hold slot here). Whoops also subscribes to preserve
+    // its snapshot across the spawnNext call in the first-hold
+    // branch; it's a no-op on the swap branch (no spawnNext fires).
+    this._notifyPlugins('beforeHoldSwap');
     if (this.hold) {
-      // Swap branch: spawn the previously-held type and reattach the
-      // specials we stored alongside it on its way into hold. The
-      // restored piece doesn't fire onSpecialSpawn — the spawn cue is
-      // for first-arrival only; a swap is the player choosing to bring
-      // a special back, not a fresh roll.
       this.current = spawn(this.hold);
-      if (this.holdSpecials) {
-        this.current.specials = this.holdSpecials.map(s => ({ ...s }));
-      }
       if (collides(this.board, this.current)) this.gameOver = true;
     } else {
-      // First-hold branch: stash the held piece and pull the next from
-      // the queue. spawnNext would normally fire onSpawn, which
-      // overwrites Whoops' pre-spawn snapshot — but pressing W after a
-      // hold should rewind to before the *held* piece existed, not
-      // before the pulled-from-queue piece. Bracket the spawn with
-      // beforeHoldSwap / afterHoldSwap so Whoops can preserve its
-      // existing snapshot across the swap.
-      this._notifyPlugins('beforeHoldSwap');
+      // First-hold branch: stash the held piece and pull the next
+      // from the queue. spawnNext goes through its standard
+      // decoratePiece roll for the new piece.
       this.spawnNext();
-      this._notifyPlugins('afterHoldSwap');
     }
+    this._notifyPlugins('afterHoldSwap');
     this.hold = t;
-    this.holdSpecials = specials;
     this.canHold = false;
   }
 
@@ -693,13 +669,15 @@ export class Game {
     //
     //   Standard clear
     //     Pull the next piece from the queue.
-    if (this.gravity?.active) {
+    const fillS = this._pluginState.fill;
+    if (this._pluginState.gravity?.active) {
       // endCascade will spawnNext when no parked piece is restorable.
-    } else if (this.fill.savedPiece) {
-      this.current = this.fill.savedPiece;
-      this.fill.savedPiece = null;
+    } else if (fillS?.savedPiece) {
+      this.current = fillS.savedPiece;
+      fillS.savedPiece = null;
       if (collides(this.board, this.current)) this.gameOver = true;
-      this.onFillComplete?.();
+      // game.onPluginIdle will fire on the next tick if no other
+      // plugin is still freezing — same path as the standard clear.
     } else {
       this.spawnNext();
     }
@@ -756,12 +734,24 @@ export class Game {
       }
     }
 
+    // Plugin-idle transition: fire `onPluginIdle` once when the world
+    // settles back to "no plugin freezing AND no clear animating."
+    // This replaces the per-feature completion callbacks (the old
+    // onChiselComplete / onFillComplete / onGravityComplete trio) —
+    // main.js subscribes once and routes to powerupMenu.showNext, so
+    // any future modal plugin gets menu-resume behavior for free.
+    const busyNow = this._isBusy();
+    if (this._wasBusy && !busyNow) {
+      this.onPluginIdle?.();
+    }
+    this._wasBusy = busyNow;
+
     // Plugin freeze takes priority over the choice menu — Gravity
     // milestones earned mid-cascade can bump pendingChoices > 0, and
     // we need the cascade to keep ticking through that interval. The
-    // menu itself stays deferred by main.js's gravity.active /
-    // chisel/fill checks until endGravity (or chisel/fill complete)
-    // fires its onComplete hook.
+    // menu itself stays deferred by main.js's plugin-state checks
+    // until the cascade ends (the busy-transition above then fires
+    // onPluginIdle, which main.js routes to showNext).
     if (this._isFrozenByPlugin()) return;
 
     // Freeze gameplay while the power-up choice menu is open.

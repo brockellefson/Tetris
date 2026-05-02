@@ -66,31 +66,52 @@ Each non-trivial power-up or curse exports a single object with a card definitio
 | `tick(game, dt)`                  | Every frame, **before** the freeze check. Plugins manage their own animation timers even while another plugin freezes the main loop.            |
 | `freezesGameplay(game)`           | Return `true` to skip the rest of `tick()` (DAS / falling gravity / standard line-clear). Used by modal plugins (Chisel, Fill, Gravity).        |
 | `onSpawn(game)`                   | After `spawnNext()` installs a new current piece. Whoops snapshots here.                                                                        |
-| `onLock(game)`                    | At the top of `lockCurrent()`, before the board mutation. Whoops promotes its pre-spawn snapshot here.                                          |
-| `onClear(game, cleared)`          | At the end of `completeClear()`, after score/level have been updated.                                                                           |
+| `onLock(game)`                    | At the top of `lockCurrent()`, before the board mutation. Whoops promotes its pre-spawn snapshot here. Specials writes piece-bound tags onto its boardGrid here. |
+| `onClear(game, cleared)`          | At the end of `completeClear()`, after score/level have been updated. Specials fires the captured triggers here.                                |
 | `onPlayerAdjustment(game, kind)`  | Successful `move` / `rotate` / `flip`. Slick uses this for its step-reset; Flip fires it explicitly after a successful mirror.                  |
-| `beforeHoldSwap(game)` / `afterHoldSwap(game)` | Around `holdPiece`'s internal `spawnNext` on the first-hold branch. Whoops uses these to preserve its undo target across the swap. |
+| `beforeHoldSwap(game)` / `afterHoldSwap(game)` | Around `holdPiece`'s swap (BOTH branches now). Whoops uses them to preserve its undo target across the first-hold spawnNext; Specials uses them to preserve a tagged mino's metadata in/out of its hold slot. |
 | `shouldDeferLock(game)`           | Return `true` to skip `softDrop()`'s immediate lock-on-collision. Slick gates locking behind its lock-delay window via this.                    |
 | `interceptInput(game, action, ...args)` | Return `true` to claim the action. Used by Chisel/Fill/Whoops/Flip for their key spends, by cell-pick cursors for `cursor:*`, and by the board click handler for `boardClick(col, row)`. |
 | `modifyGravityIndex(game, idx)`   | Modifier hook, threaded through `_reduceHookValue`. Hyped adds `+1` per stack so pieces fall faster.                                            |
 | `allowsBagPiece(game, type)`      | Veto hook, polled via `_allowedByAllPlugins`. Returning `false` for a type drops it from the next bag refill. Cruel uses this to forbid I-pieces. |
 | `decoratePiece(game, piece)`      | Modifier hook, threaded through `_reduceHookValue`, fired inside `spawnNext()` between `spawn(type)` and the assignment to `current`. Specials uses this to possibly attach a tagged mino. |
 | `beforeClear(game, rows)`         | Fires inside `completeClear()` and `completeCascadeClear()` immediately before `removeRows`, with the row indices about to be removed. Specials captures triggers and shifts its parallel grid here. |
-| `onCellRemoved(game, x, y, source)` | Fires from single-cell removers (Chisel today) AFTER the board cell is nulled. `source` distinguishes call sites. Specials fires the cell's trigger here. |
+| `onCellRemoved(game, x, y, source)` | Fires from single-cell removers (Chisel, Bomb blasts, Lightning column) AFTER the board cell is nulled. `source` distinguishes call sites. Specials fires the cell's trigger here AND awards `SPECIAL_DESTROY_POINTS × level` for every removed cell. |
+| `serialize(game)` / `restore(game, snap)` | Optional pair. If a plugin owns state that should round-trip a Whoops rewind, `serialize` returns a deep-clonable snapshot and `restore` re-installs it. Whoops's snapshot iterates every plugin with these hooks — adding a new plugin's state to Whoops requires zero changes to Whoops itself. |
 
-**State slots stay on `Game`** for things the renderer/HUD needs to read:
-- `game.unlocks.{hold, ghost, slick, nextCount, chiselCharges, fillCharges, flipCharges, whoopsCharges}` — flags & charge counters
+### Plugin-state bag
+
+Mutable per-plugin state lives at `game._pluginState[pluginId]` — a generic bag, NOT named slots on Game. Each plugin claims its slot from its `reset(game)` hook:
+
+```js
+reset(game) {
+  game._pluginState.chisel = { active: false, target: null, cursor: null };
+}
+```
+
+Renderer/HUD/menus read it via the bag:
+
+```js
+const chiselState = game._pluginState.chisel;
+if (chiselState?.target) drawChiselShatter(...);
+```
+
+This replaced the old per-feature named slots (`game.chisel`, `game.fill`, `game.gravity`, `game.boardSpecials`, `game.holdSpecials`, `game._forceNextSpecial`, `game._pendingSpecialTriggers`). Adding a new modal feature now requires zero edits to Game's surface — the plugin just claims a slot.
+
+A few things genuinely belong on Game (engine-level, not plugin-owned):
+- `game.unlocks.{hold, ghost, slick, nextCount, chiselCharges, fillCharges, flipCharges, whoopsCharges}` — flags & charge counters consumed by many systems
 - `game.curses.{junk, hyped, cruelUntilLevel, extraCols}` — active-curse state for the HUD
-- `game.chisel`, `game.fill`, `game.gravity` — plugin state slots that the renderer reads to paint cursors / animations / hide the parked piece during cascades
 - `game.lockDelayTimer` — Slick's timer (Game initializes it; Slick reads/writes it)
-- `game.boardSpecials` — parallel-to-`game.board` grid of special-block tags (`'gravity' | null`). Owned by the specials plugin; lives on Game so the renderer and Whoops snapshot can read it directly.
-- `game._forceNextSpecial` — debug-only: when set, the specials plugin's `decoratePiece` consumes it on the next spawn instead of rolling.
 
-The decoupling is on the **behavior** side: the engine holds the data, plugins hold the logic.
+### `onPluginIdle`
+
+Fires once when "any plugin freezing OR a clear animating" transitions to "everything settled." `main.js` wires it to `powerupMenu.showNext` so the menu auto-resumes after any modal interaction (Chisel pick, Fill pick, Gravity cascade, future bombs that take time, etc.) finishes — no need for plugins to fire their own per-feature completion callback. A new modal plugin gets menu-resume behavior for free as long as `freezesGameplay` returns `true` while it's busy.
+
+The decoupling is on the **behavior** side: the bag holds plugin data, plugins hold the logic, and Whoops + main.js iterate plugins generically rather than knowing each one by name.
 
 ## Special blocks
 
-A **special block** is metadata attached to a single mino. While the piece is falling, the special travels with it (anchored by piece-local rot-0 coords + the `transformLocalCoord` helper in `pieces.js`). When the piece locks, the special anchors to a board cell in the parallel `game.boardSpecials` grid. When that cell is removed — by a line clear, by Chisel, or by any future single-cell remover that fires `onCellRemoved` — the special's `onTrigger(game, x, y, source)` runs and decides what happens.
+A **special block** is metadata attached to a single mino. While the piece is falling, the special travels with it (anchored by piece-local rot-0 coords + the `transformLocalCoord` helper in `pieces.js`). When the piece locks, the special anchors to a board cell in the parallel grid at `game._pluginState.specials.boardGrid` (owned by the specials plugin). When that cell is removed — by a line clear, by Chisel, by a Bomb blast, by Lightning's column-clear, or by any future single-cell remover that fires `onCellRemoved` — the special's `onTrigger(game, x, y, source)` runs and decides what happens.
 
 Each special exports the same shape the power-ups and curses do, plus visual identity:
 

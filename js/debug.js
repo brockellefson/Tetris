@@ -147,17 +147,21 @@ const DEBUG_BLESSINGS = [
 
 // "Force a special on the next-spawned piece" pills. Reads ALL_SPECIALS
 // so adding a new special automatically gets a debug pill — zero edits
-// here. Setting `_forceNextSpecial = id` is consumed by the specials
-// plugin's decoratePiece on the next spawnNext(), so the next piece
-// always carries the chosen special. Clicking the pill again before
-// the next spawn changes the queued kind; clicking the same pill
-// twice (re-applying) re-arms it harmlessly.
+// here. Setting `_pluginState.specials.forceNext = id` is consumed by
+// the specials plugin's decoratePiece on the next spawnNext(), so the
+// next piece always carries the chosen special. Clicking the pill
+// again before the next spawn changes the queued kind; clicking the
+// same pill twice (re-applying) re-arms it harmlessly.
+const specialsBag = (g) => g._pluginState.specials;
 const DEBUG_SPECIALS = ALL_SPECIALS.map(s => ({
   id: `force-${s.id}`,
   name: `Force ${s.name}`,
-  apply:    (g) => { g._forceNextSpecial = s.id; },
-  remove:   (g) => { if (g._forceNextSpecial === s.id) g._forceNextSpecial = null; },
-  isActive: (g) =>   g._forceNextSpecial === s.id,
+  apply:    (g) => { const sb = specialsBag(g); if (sb) sb.forceNext = s.id; },
+  remove:   (g) => {
+    const sb = specialsBag(g);
+    if (sb && sb.forceNext === s.id) sb.forceNext = null;
+  },
+  isActive: (g) =>   specialsBag(g)?.forceNext === s.id,
 }));
 
 // remove() notes per curse:

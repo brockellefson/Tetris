@@ -5,7 +5,7 @@
 // A "special block" is metadata attached to a single mino of a
 // piece. While the piece is falling, the special travels with the
 // piece via piece-local rot-0 coordinates. When the piece locks,
-// the special anchors to a board cell in `game.boardSpecials`. When
+// the special anchors to a board cell in `_pluginState.specials.boardGrid`. When
 // that cell is removed (line clear, chisel, future cascade), its
 // `onTrigger` fires — and the special itself decides what happens.
 //
@@ -121,16 +121,17 @@ function rot0Minos(type) {
 // extended) piece object — never mutates the input. Triggered from
 // the decoratePiece hook in spawnNext().
 //
-// `forceKind` lets the debug menu queue a specific special on the
-// next spawn (one-shot — Game stores it as `_forceNextSpecial` and
-// clears it after consumption). Bypasses the chance roll but still
-// honors `available()` so debug can't force a special the game has
-// gated off.
+// `forceNext` (a slot inside the specials state bag) lets the debug
+// menu queue a specific special on the next spawn — set it via
+// `game._pluginState.specials.forceNext = '<id>'` and the next
+// spawn consumes it. Bypasses the chance roll but still honors
+// `available()` so debug can't force a special the game has gated off.
 export function maybeAttachSpecial(game, piece) {
+  const s = specialsState(game);
   let chosen = null;
-  const forced = game._forceNextSpecial;
+  const forced = s?.forceNext;
   if (forced) {
-    game._forceNextSpecial = null;
+    s.forceNext = null;
     chosen = SPECIALS_BY_ID[forced];
     if (chosen && chosen.available?.(game) === false) chosen = null;
   } else {
@@ -152,6 +153,11 @@ export function maybeAttachSpecial(game, piece) {
     specials: [{ rot0Row: mino.r, rot0Col: mino.c, kind: chosen.id }],
   };
 }
+
+// Convenience accessor — slot lives in the plugin-state bag, seeded
+// by this plugin's reset hook. Used by external readers (renderer,
+// gravity-cascade) that need the parallel grid.
+export const specialsState = (game) => game._pluginState.specials;
 
 // Lookup helper used by the renderer: does the piece carry a special
 // at the given (currentRotation, row, col)? Returns the kind string
@@ -226,10 +232,11 @@ function runSpecialTrigger(game, def, x, y, source) {
 }
 
 function fireSpecialAt(game, x, y, source) {
-  if (!game.boardSpecials) return;
-  const kind = game.boardSpecials[y]?.[x];
+  const s = specialsState(game);
+  if (!s?.boardGrid) return;
+  const kind = s.boardGrid[y]?.[x];
   if (!kind) return;
-  game.boardSpecials[y][x] = null;
+  s.boardGrid[y][x] = null;
   const def = SPECIALS_BY_ID[kind];
   if (!def) return;
   runSpecialTrigger(game, def, x, y, source);
@@ -241,15 +248,37 @@ function fireSpecialAt(game, x, y, source) {
 // pure of any specific special's logic — every special drives its
 // own behavior through `onTrigger`.
 
+// Module-scoped capture between beforeHoldSwap and afterHoldSwap so
+// the special on the piece going INTO hold survives across the
+// piece-swap operation. Cleared after the swap to prevent stale
+// state from leaking into the next hold.
+let _pendingHoldSpecials = null;
+
 export default {
+  id: 'specials',
+
   // ---- Lifecycle ----
 
   reset(game) {
     const cols = game.board[0]?.length ?? COLS;
     const rows = game.board.length;
-    game.boardSpecials = newBoardSpecials(cols, rows);
-    game._pendingSpecialTriggers = null;
-    game._forceNextSpecial = null;
+    game._pluginState.specials = {
+      // Parallel-to-game.board grid storing each cell's special kind.
+      boardGrid: newBoardSpecials(cols, rows),
+      // Mirror of the active piece's `specials` array for the held
+      // slot. Owned here (not on Game) so a held special doesn't
+      // evaporate on swap and so Whoops auto-rewinds it via the
+      // generic plugin-serialize loop.
+      holdSpecials: null,
+      // List of pending triggers captured in beforeClear, fired in
+      // onClear. Lives in the bag (not module-state) so a Whoops
+      // rewind mid-clear doesn't leave stale entries.
+      pendingTriggers: null,
+      // Debug-menu queue: when set, the next spawnNext consumes this
+      // id instead of rolling. Cleared by maybeAttachSpecial.
+      forceNext: null,
+    };
+    _pendingHoldSpecials = null;
     // Reset module-level trigger-batch counters. If a restart happens
     // mid-trigger (extremely unlikely — the only path is the player
     // hitting R during a chisel-into-bomb chain) we'd otherwise carry
@@ -257,6 +286,34 @@ export default {
     // or fire one early.
     _triggerDepth = 0;
     _triggerDestroyCount = 0;
+  },
+
+  // ---- Serialize / restore (Whoops snapshot) ----
+  //
+  // The specials plugin opts into Whoops's generic plugin-snapshot
+  // loop by exposing serialize/restore. Captures the boardGrid (deep-
+  // cloned so later mutations don't alias the snapshot) and the
+  // held-specials slot. The active piece's own `specials` array is
+  // intentionally NOT serialized — restore goes through spawnNext
+  // → decoratePiece, which re-rolls fresh, so the rewound piece may
+  // carry a different special. By design: rewinding shouldn't lock
+  // in a known-good roll.
+  serialize(game) {
+    const s = specialsState(game);
+    if (!s) return null;
+    return {
+      boardGrid: s.boardGrid ? s.boardGrid.map(row => row.slice()) : null,
+      holdSpecials: s.holdSpecials ? s.holdSpecials.map(sp => ({ ...sp })) : null,
+    };
+  },
+  restore(game, snap) {
+    if (!snap) return;
+    const s = specialsState(game);
+    if (!s) return;
+    if (snap.boardGrid) s.boardGrid = snap.boardGrid.map(row => row.slice());
+    s.holdSpecials = snap.holdSpecials
+                       ? snap.holdSpecials.map(sp => ({ ...sp }))
+                       : null;
   },
 
   // ---- Spawn — possibly attach a special ----
@@ -271,22 +328,58 @@ export default {
   // ---- Lock — transfer piece-bound specials onto the board ----
   //
   // onLock fires BEFORE the board mutation, but writing to the
-  // parallel boardSpecials grid is independent — no ordering
-  // hazard. We resolve each tagged mino through transformLocalCoord
-  // so rotation/flip state is honored.
+  // parallel boardGrid is independent — no ordering hazard. We
+  // resolve each tagged mino through transformLocalCoord so rotation/
+  // flip state is honored.
 
   onLock(game) {
     const piece = game.current;
     if (!piece?.specials) return;
-    if (!game.boardSpecials) return;
+    const s = specialsState(game);
+    if (!s?.boardGrid) return;
     for (const sp of piece.specials) {
       const t = transformLocalCoord(piece, sp.rot0Row, sp.rot0Col);
       const x = piece.x + t.c;
       const y = piece.y + t.r;
-      if (y < 0 || y >= game.boardSpecials.length) continue;
-      if (x < 0 || x >= game.boardSpecials[0].length) continue;
-      game.boardSpecials[y][x] = sp.kind;
+      if (y < 0 || y >= s.boardGrid.length) continue;
+      if (x < 0 || x >= s.boardGrid[0].length) continue;
+      s.boardGrid[y][x] = sp.kind;
     }
+  },
+
+  // ---- Hold swap — preserve specials across the swap ----
+  //
+  // Game.holdPiece fires beforeHoldSwap before swapping current and
+  // afterHoldSwap after. We use the bracket to:
+  //   1. Stash the active piece's specials in _pendingHoldSpecials
+  //      (module-scoped — only valid between the two hooks).
+  //   2. After the swap, the new `current` is either the previously-
+  //      held piece (no specials yet) or a fresh-from-queue piece
+  //      (which got its own decoratePiece roll). Reattach the
+  //      previously-held specials onto current if applicable, then
+  //      promote our captured pending into holdSpecials so the next
+  //      swap can restore it.
+
+  beforeHoldSwap(game) {
+    _pendingHoldSpecials = game.current?.specials
+      ? game.current.specials.map(sp => ({ ...sp }))
+      : null;
+  },
+
+  afterHoldSwap(game) {
+    const s = specialsState(game);
+    if (!s) return;
+    // Restore previously-held specials onto the new active piece
+    // (only the swap branch — the first-hold branch's new piece
+    // came from spawnNext + decoratePiece, which already rolled its
+    // own special if any; we don't overwrite that). Distinguish by
+    // whether holdSpecials had anything to give back.
+    if (s.holdSpecials && game.current && !game.current.specials) {
+      game.current.specials = s.holdSpecials.map(sp => ({ ...sp }));
+    }
+    // The piece going INTO hold now becomes the held special.
+    s.holdSpecials = _pendingHoldSpecials;
+    _pendingHoldSpecials = null;
   },
 
   // ---- Line clear ----
@@ -294,23 +387,24 @@ export default {
   // beforeClear fires INSIDE completeClear (and the gravity cascade's
   // completeCascadeClear) before removeRows runs. We:
   //   1. Capture which special-bearing cells are about to vanish.
-  //   2. Mirror removeRows on boardSpecials so post-clear rendering
+  //   2. Mirror removeRows on boardGrid so post-clear rendering
   //      sees the right grid alignment.
   //   3. Stash the captured list for onClear to fire.
 
   beforeClear(game, rows) {
-    if (!game.boardSpecials) return;
+    const s = specialsState(game);
+    if (!s?.boardGrid) return;
     const triggers = [];
     for (const r of rows) {
-      const row = game.boardSpecials[r];
+      const row = s.boardGrid[r];
       if (!row) continue;
       for (let c = 0; c < row.length; c++) {
         const kind = row[c];
         if (kind) triggers.push({ kind, x: c, y: r });
       }
     }
-    removeRowsSpecials(game.boardSpecials, rows);
-    game._pendingSpecialTriggers = triggers;
+    removeRowsSpecials(s.boardGrid, rows);
+    s.pendingTriggers = triggers;
   },
 
   // onClear fires AFTER all standard scoring/spawn logic has run, so
@@ -320,8 +414,10 @@ export default {
   // same clear no-ops cleanly.
 
   onClear(game, _cleared) {
-    const list = game._pendingSpecialTriggers;
-    game._pendingSpecialTriggers = null;
+    const s = specialsState(game);
+    if (!s) return;
+    const list = s.pendingTriggers;
+    s.pendingTriggers = null;
     if (!list || list.length === 0) return;
     for (const t of list) {
       const def = SPECIALS_BY_ID[t.kind];

@@ -8,13 +8,14 @@
 //      card just bumps `game.unlocks.chiselCharges`; the heavy
 //      interaction lives in the lifecycle hooks below.
 //
-//   2. Lifecycle plugin (freezesGameplay, tick, interceptInput) —
-//      registered on the Game in main.js. The chisel state slot
-//      (`game.chisel = { active, target, cursor }`) still lives on
-//      Game so the renderer / chisel-hint UI can read it directly,
-//      but every mutation flows through this file.
+//   2. Lifecycle plugin (freezesGameplay, tick, interceptInput,
+//      reset) — registered on the Game in main.js. The chisel state
+//      slot lives in the generic plugin-state bag at
+//      `game._pluginState.chisel = { active, target, cursor }`,
+//      seeded by this plugin's reset hook. Renderer and UI read it
+//      from the bag; every mutation flows through this file.
 //
-// Interaction phases (driven by `game.chisel`):
+// Interaction phases (driven by `game._pluginState.chisel`):
 //   active = true                  — waiting for the player to pick a
 //                                    cell. freezesGameplay is true.
 //                                    Click or Enter on a filled cell
@@ -43,6 +44,11 @@
 
 import { CHISEL_DURATION, MAX_CHISEL_CHARGES } from '../constants.js';
 
+// Convenience accessor — the slot is initialized in reset() so it's
+// always present once the game has started, but the optional-chain
+// guards the brief construct-then-register-then-start window.
+const cs = (game) => game._pluginState.chisel;
+
 function clampCursor(game, x, y) {
   const cols = game.board[0]?.length ?? 10;
   const rows = game.board.length;
@@ -56,42 +62,45 @@ function clampCursor(game, x, y) {
 // starts on a meaningful block. Falls back to (0, 0) only if the board
 // is somehow empty (the activation guard rules this out in practice).
 function initCursor(game) {
+  const s = cs(game);
   const cols = game.board[0]?.length ?? 10;
   for (let r = 0; r < game.board.length; r++) {
     for (let c = 0; c < cols; c++) {
       if (game.board[r][c]) {
-        game.chisel.cursor = { x: c, y: r };
+        s.cursor = { x: c, y: r };
         return;
       }
     }
   }
-  game.chisel.cursor = { x: 0, y: 0 };
+  s.cursor = { x: 0, y: 0 };
 }
 
 function moveCursor(game, dx, dy) {
-  if (!game.chisel.active || !game.chisel.cursor) return;
-  const cur = game.chisel.cursor;
+  const s = cs(game);
+  if (!s.active || !s.cursor) return;
+  const cur = s.cursor;
   const next = clampCursor(game, cur.x + dx, cur.y + dy);
   // Suppress the cursor-move sound when clamping at the edge makes
   // the keypress a no-op.
   const moved = next.x !== cur.x || next.y !== cur.y;
-  game.chisel.cursor = next;
+  s.cursor = next;
   if (moved) game.onCursorMove?.();
 }
 
 // Player picked a block to chisel out. Returns true if the click hit
 // a filled cell; false (and no state change) otherwise so the UI can
 // ignore the click. The block is removed immediately — the timer on
-// chisel.target only drives the visual shatter effect.
+// the target only drives the visual shatter effect.
 function selectCell(game, x, y) {
-  if (!game.chisel.active) return false;
+  const s = cs(game);
+  if (!s.active) return false;
   if (x < 0 || x >= game.board[0].length || y < 0 || y >= game.board.length) return false;
   const type = game.board[y][x];
   if (!type) return false;                  // empty cell — let the player try again
   game.board[y][x] = null;
-  game.chisel.active = false;
-  game.chisel.cursor = null;
-  game.chisel.target = { x, y, type, timer: 0 };
+  s.active = false;
+  s.cursor = null;
+  s.target = { x, y, type, timer: 0 };
   // Notify single-cell removal via the plugin bus. Specials listens
   // on this hook and fires the cell's onTrigger if it carried one
   // — letting a chisel'd Gravity special kick off a cascade while
@@ -102,11 +111,12 @@ function selectCell(game, x, y) {
 }
 
 function activate(game) {
+  const s = cs(game);
   if (!game.started) return false;
   if (game.paused || game.gameOver) return false;
   if (game.pendingChoices > 0) return false;
   if (game.isClearing()) return false;
-  if (game.chisel.active || game.chisel.target) return false;
+  if (s.active || s.target) return false;
   if (game._isFrozenByPlugin()) return false; // fill modal, gravity cascade, etc.
   if (game.unlocks.chiselCharges <= 0) return false;
   // No locked block on the board → activating would just hang the
@@ -114,7 +124,7 @@ function activate(game) {
   const hasBlock = game.board.some(row => row.some(cell => cell !== null));
   if (!hasBlock) return false;
   game.unlocks.chiselCharges -= 1;
-  game.chisel.active = true;
+  s.active = true;
   initCursor(game);
   return true;
 }
@@ -133,23 +143,35 @@ export default {
 
   // ---- lifecycle hooks ----
 
-  freezesGameplay: (game) => game.chisel.active || !!game.chisel.target,
+  // Seed the chisel slot in the plugin-state bag on every Game.reset()
+  // so a restart doesn't carry stale active/target/cursor state across
+  // runs. Owns the slot's lifetime; nothing else writes here.
+  reset(game) {
+    game._pluginState.chisel = { active: false, target: null, cursor: null };
+  },
+
+  freezesGameplay: (game) => {
+    const s = cs(game);
+    return !!s && (s.active || !!s.target);
+  },
 
   // While the destruction animation plays we still freeze gameplay,
   // but the timer must keep advancing or the animation never ends.
   // The active phase has nothing to tick (waiting on player input).
   tick: (game, dt) => {
-    if (!game.chisel.target) return;
-    game.chisel.target.timer += dt;
-    if (game.chisel.target.timer >= CHISEL_DURATION) {
-      game.chisel.target = null;
-      // Tells main.js to resume the menu queue (a chisel pick can
-      // be earned mid-clear which queues a power-up choice).
-      game.onChiselComplete?.();
+    const s = cs(game);
+    if (!s?.target) return;
+    s.target.timer += dt;
+    if (s.target.timer >= CHISEL_DURATION) {
+      s.target = null;
+      // game.onPluginIdle fires automatically on the next tick when
+      // freezesGameplay drops to false — main.js routes that to the
+      // menu-resume signal, so no explicit completion callback here.
     }
   },
 
   interceptInput(game, action, ...args) {
+    const s = cs(game);
     switch (action) {
       case 'chisel:activate':
         return activate(game);
@@ -157,34 +179,36 @@ export default {
       // (waiting-for-pick) phase. The animation phase swallows input
       // upstream via the freezesGameplay gate in input.js.
       case 'cursor:left':
-        if (!game.chisel.active) return false;
+        if (!s?.active) return false;
         moveCursor(game, -1, 0); return true;
       case 'cursor:right':
-        if (!game.chisel.active) return false;
+        if (!s?.active) return false;
         moveCursor(game, 1, 0); return true;
       case 'cursor:up':
-        if (!game.chisel.active) return false;
+        if (!s?.active) return false;
         moveCursor(game, 0, -1); return true;
       case 'cursor:down':
-        if (!game.chisel.active) return false;
+        if (!s?.active) return false;
         moveCursor(game, 0, 1); return true;
       case 'cursor:confirm':
-        if (!game.chisel.active || !game.chisel.cursor) return false;
-        return selectCell(game, game.chisel.cursor.x, game.chisel.cursor.y);
+        if (!s?.active || !s.cursor) return false;
+        return selectCell(game, s.cursor.x, s.cursor.y);
       case 'cursor:cancel':
         // Bail out of an active pick. Symmetric with activate(): we
         // refund the charge that activate() decremented, drop the
         // active/cursor state, and notify main.js that the menu
         // queue can resume (a chisel earned mid-clear may have a
         // power-up choice waiting behind it).
-        if (!game.chisel.active) return false;
+        if (!s?.active) return false;
         game.unlocks.chiselCharges += 1;
-        game.chisel.active = false;
-        game.chisel.cursor = null;
-        game.onChiselComplete?.();
+        s.active = false;
+        s.cursor = null;
+        // No explicit completion callback — game.onPluginIdle fires
+        // on the next tick when freezesGameplay sees this plugin
+        // settle (active=false, target=null).
         return true;
       case 'boardClick': {
-        if (!game.chisel.active) return false;
+        if (!s?.active) return false;
         const [col, row] = args;
         return selectCell(game, col, row);
       }

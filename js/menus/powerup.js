@@ -15,10 +15,8 @@
 //
 // Lifecycle:
 //   const menu = setupPowerupMenu(game);
-//   game.onPowerUpChoice  = () => menu.showNext();
-//   game.onChiselComplete = () => menu.showNext();
-//   game.onFillComplete   = () => menu.showNext();
-//   game.onGravityComplete= () => menu.showNext();
+//   game.onPowerUpChoice = () => menu.showNext();   // milestone earned
+//   game.onPluginIdle    = () => menu.showNext();   // freezing modal ended
 //   menu.clear();   // call on restart so a new run starts clean
 //
 // The menu is fully keyboard-navigable (arrows / WASD / 1-2-3 /
@@ -167,12 +165,15 @@ export function setupPowerupMenu(game) {
     // this function, and by the time the rAF fires a freezing plugin
     // (Gravity cascade triggered by a special on the just-cleared
     // row, etc.) may have flipped on. Defer back into showNext so
-    // the standard "wait for cascade complete → onGravityComplete →
+    // the standard "wait for everything to settle → onPluginIdle →
     // showNext" loop reopens us when the world has settled.
     if (game.gameOver) return;
-    if (game.chisel.active || game.chisel.target) return;
-    if (game.fill.active || game.fill.target) return;
-    if (game.gravity.active) return;
+    const chiselS = game._pluginState.chisel;
+    const fillS   = game._pluginState.fill;
+    const gravS   = game._pluginState.gravity;
+    if (chiselS?.active || chiselS?.target) return;
+    if (fillS?.active || fillS?.target) return;
+    if (gravS?.active) return;
     const powerups = pickChoices(game, 3);
     if (powerups.length === 0) {
       game.pendingChoices = 0;
@@ -217,10 +218,13 @@ export function setupPowerupMenu(game) {
     if (game.gameOver) return;
     // Don't pop while chisel/fill is mid-interaction — the modal
     // would steal the click/keyboard focus the power-up needs.
-    if (game.chisel.active || game.chisel.target) return;
-    if (game.fill.active || game.fill.target) return;
+    const chiselS = game._pluginState.chisel;
+    const fillS   = game._pluginState.fill;
+    const gravS   = game._pluginState.gravity;
+    if (chiselS?.active || chiselS?.target) return;
+    if (fillS?.active || fillS?.target) return;
     // Don't pop while the Gravity cascade is running.
-    if (game.gravity.active) return;
+    if (gravS?.active) return;
     // Don't open a second menu if one is already up.
     if (!powerupMenu$.classList.contains('hidden')) return;
 

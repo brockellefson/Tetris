@@ -118,8 +118,8 @@ export function setupHUD() {
   // Both power-ups share one banner since only one is ever active
   // at a time. The text changes based on which power-up is asking.
   function syncChiselHint(game) {
-    const chiselActive = game.chisel.active;
-    const fillActive = game.fill.active;
+    const chiselActive = !!game._pluginState.chisel?.active;
+    const fillActive = !!game._pluginState.fill?.active;
     const active = chiselActive || fillActive;
     if (chiselActive) {
       chiselHint$.innerHTML = 'CLICK OR USE ARROW KEYS + ENTER TO CHISEL';
