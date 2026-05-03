@@ -8,5 +8,6 @@
 // joins the export list below and the mode-picker on the splash
 // screen reads from this module directly.
 
-export { TETRIS_MODE } from './tetris/mode.js';
-export { PUYO_MODE }   from './puyo/mode.js';
+export { TETRIS_MODE }       from './tetris/mode.js';
+export { PUYO_MODE }         from './puyo/mode.js';
+export { PUYO_VERSUS_MODE }  from './puyo/versus/mode.js';

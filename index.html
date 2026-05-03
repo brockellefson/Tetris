@@ -39,6 +39,16 @@
   <div id="app">
     <div class="game">
       <div>
+        <!-- Opponent's field — visible only in Puyo versus. The
+             state-sync-plugin on each tab broadcasts compact
+             snapshots of its own board over the match controller;
+             the opponent-view module receives them and paints
+             into this canvas via drawCompactBoard. HUD toggles
+             visibility based on game.mode.id. -->
+        <div class="panel hidden" id="opponent-panel">
+          <h2>Opponent</h2>
+          <canvas id="opponent-board" width="120" height="240"></canvas>
+        </div>
         <div class="panel" id="hold-panel">
           <h2>Hold</h2>
           <canvas id="hold" class="mini" width="100" height="80"></canvas>
@@ -135,6 +145,14 @@
       </button>
       <button id="play-puyo-btn" class="menu-btn" type="button">
         <span class="menu-btn-text">PLAY PUYO</span>
+      </button>
+      <!-- Local fake-versus, dev-only entry point. Opens a
+           BroadcastChannel and waits for a second tab on the same
+           machine to click the same button. When two tabs are
+           paired both kick off a Puyo run and trade nuisance over
+           the channel. js/main.js owns the handshake. -->
+      <button id="play-versus-btn" class="menu-btn menu-btn-secondary" type="button">
+        <span class="menu-btn-text">VS LOCAL</span>
       </button>
       <!-- Secondary action — opens the global leaderboard browse
            overlay. Hidden gracefully (via JS) when js/config.js has
@@ -245,6 +263,32 @@
   <div id="powerup-menu" class="hidden">
     <div class="powerup-menu-inner">
       <div class="powerup-cards" id="powerup-cards"></div>
+    </div>
+  </div>
+
+  <!-- Match-end menu (Puyo versus). Shown when the local game ends
+       OR when the opponent's 'i_lost' message lands. Two actions:
+       REMATCH starts a fresh versus run on the same channel; EXIT
+       tears down the channel and returns to the splash. Arrow keys
+       + Enter / Space navigate; Esc exits. setupMatchEndMenu owns
+       the show / hide / handler wiring. -->
+  <div id="versus-end" class="hidden">
+    <div class="leaderboard-card">
+      <h2 class="leaderboard-title" id="versus-end-title">MATCH OVER</h2>
+      <div class="versus-end-actions">
+        <button id="versus-end-rematch" class="menu-btn" type="button">
+          <span class="menu-btn-text">REMATCH</span>
+        </button>
+        <button id="versus-end-exit" class="menu-btn menu-btn-secondary" type="button">
+          <span class="menu-btn-text">EXIT TO MENU</span>
+        </button>
+      </div>
+      <!-- Live status line under the buttons. local-vs writes
+           "WAITING FOR OPPONENT…" once the local player clicks
+           REMATCH, "OPPONENT IS READY" when the peer clicks
+           first, or "OPPONENT LEFT" if the peer exits. Empty in
+           the initial post-match state. -->
+      <div class="versus-end-status" id="versus-end-status"></div>
     </div>
   </div>
 

@@ -195,7 +195,12 @@ function applyClearEffects(game, result) {
   // fire BEFORE the power-up menu callback below so any freezing
   // plugin they start (cascade today) flips its `freezesGameplay`
   // gate true synchronously, and the menu defers cleanly.
-  game._notifyPlugins('onClear', cleared);
+  // Pass the full result alongside the line count so plugins that
+  // need to inspect the clear (the puyo garbage plugin uses this
+  // to compute outgoing nuisance via pointsForStep) can do so
+  // without a backchannel. Existing handlers that take only
+  // `(game, cleared)` ignore the extra arg.
+  game._notifyPlugins('onClear', cleared, result);
 
   if (milestonesEarned > 0) {
     game.onPowerUpChoice?.(game.pendingChoices);

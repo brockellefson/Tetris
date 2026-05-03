@@ -47,6 +47,7 @@ export function setupHUD() {
   const linesLabelEl   = document.getElementById('lines-label');
   const holdPanel$     = document.getElementById('hold-panel');
   const nextPanel$     = document.getElementById('next-panel');
+  const opponentPanel$ = document.getElementById('opponent-panel');
   const blessingSection$ = document.getElementById('blessing-section');
   const blessingList$    = document.getElementById('blessing-list');
   const curseSection$  = document.getElementById('curse-section');
@@ -68,6 +69,7 @@ export function setupHUD() {
   // its previous value and only flush when something actually moved.
   let _lastHoldDisplay = null;
   let _lastNextPanelDisplay = null;
+  let _lastOpponentDisplay = null;
   const _lastNextCanvasDisplay = new Array(nextCanvases.length).fill(null);
   let _lastScoreText = '';
   let _lastLevelText = '';
@@ -107,7 +109,23 @@ export function setupHUD() {
   // layout.
   const PUYO_NEXT_VISIBLE = 3;
   function syncUnlocks(game) {
-    const isPuyo = game.mode?.id === 'puyo';
+    // Both Puyo single-player and Puyo versus get the same panel
+    // treatment (Next visible, Hold hidden). The two ids share
+    // every gameplay-visible mechanic; they only differ in whether
+    // the garbage and state-sync plugins are active.
+    const id = game.mode?.id;
+    const isPuyo = id === 'puyo' || id === 'puyo-versus';
+    const isVersus = id === 'puyo-versus';
+
+    // Opponent panel — only visible in versus mode. Hidden via the
+    // same diff-cache pattern as the other panels.
+    if (opponentPanel$) {
+      const opD = isVersus ? '' : 'none';
+      if (opD !== _lastOpponentDisplay) {
+        opponentPanel$.style.display = opD;
+        _lastOpponentDisplay = opD;
+      }
+    }
 
     const holdVisible = isPuyo ? false : game.unlocks.hold;
     const holdD = holdVisible ? '' : 'none';

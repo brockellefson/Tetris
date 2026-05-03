@@ -63,10 +63,83 @@ const CHAIN_POWER = [
   320, 352, 384, 416, 448, 480, 512, 544, 576, 608, 640, 672,
 ];
 
-function chainPower(step) {
+// Exported so other puyo subsystems (the garbage plugin in
+// `versus/garbage-plugin.js` is the current consumer) can compute
+// chain-step contributions without re-declaring the table. Tiny
+// coupling but it keeps the table as a single source of truth —
+// re-tuning the curve is a one-file change.
+export function chainPower(step) {
   if (step <= 0) return 0;
   if (step > CHAIN_POWER.length) return CHAIN_POWER[CHAIN_POWER.length - 1];
   return CHAIN_POWER[step - 1];
+}
+
+// Same — exported for consumers that want the per-cell base
+// (currently the garbage plugin's nuisance-from-score conversion).
+export const CHAIN_BASE_POINTS = CHAIN_BASE;
+
+// Group-size bonus. Clearing a connected group bigger than the
+// minimum 4 pays a multiplier ON TOP OF the chain power. Real
+// arcade Puyo's table — 4-cell groups give +0 (they're the
+// baseline), and the bonus grows mostly linearly until it caps
+// at +10 for groups of 11+. Encourages "build bigger groups
+// before popping" as a strategic alternative to "build longer
+// chains."
+//
+// Index 0 = group of size MIN_GROUP (4), so groups of size n use
+// GROUP_BONUS[Math.min(n - MIN_GROUP, table.length - 1)].
+const GROUP_BONUS = [0, 2, 3, 4, 5, 6, 7, 10];
+
+function bonusForGroupSize(size) {
+  const idx = Math.max(0, size - MIN_GROUP);
+  return GROUP_BONUS[Math.min(idx, GROUP_BONUS.length - 1)];
+}
+
+// Color-count bonus. Clearing groups of multiple distinct colors
+// in the SAME chain step pays a bigger multiplier — rewards
+// setups that pop two or three colors simultaneously rather than
+// one-color-per-step. Real arcade values: 1 color = +0, 2 = +3,
+// 3 = +6, 4 = +12, 5 = +24.
+const COLOR_BONUS = [0, 0, 3, 6, 12, 24];
+
+function bonusForColorCount(count) {
+  return COLOR_BONUS[Math.min(count, COLOR_BONUS.length - 1)];
+}
+
+// Compute the group-size bonus for a clear result — sum across
+// every group's individual bonus. Two groups of 4 and one of 6
+// pays 0 + 0 + 3 = 3.
+export function groupBonus(result) {
+  let total = 0;
+  for (const g of result.groups) total += bonusForGroupSize(g.cells.length);
+  return total;
+}
+
+// Compute the color-count bonus — based on the number of DISTINCT
+// colors among the cleared groups. Two G-groups + one R-group
+// counts as 2 colors, not 3.
+export function colorBonus(result) {
+  const colors = new Set();
+  for (const g of result.groups) colors.add(g.color);
+  return bonusForColorCount(colors.size);
+}
+
+// Single source of truth for "what does this clear pay?" Both
+// applyClearEffects (game.score) and the garbage plugin
+// (outgoing nuisance count) call this so a future formula tweak
+// is a one-file change. The arcade-canonical formula is:
+//
+//   points = cells × CHAIN_BASE × (chainPower + groupBonus + colorBonus) × level
+//
+// We keep the level multiplier (Tetris-style progression) on top
+// of the arcade pieces — pure arcade Puyo doesn't scale by level,
+// but our roguelite needs late-game payouts to grow.
+export function pointsForStep(result, step, level) {
+  const cells = result.cells.length;
+  const power = chainPower(step);
+  const gBonus = groupBonus(result);
+  const cBonus = colorBonus(result);
+  return cells * CHAIN_BASE * (power + gBonus + cBonus) * level;
 }
 
 // Chain step at which the all-clear bonus reads as "actually
@@ -82,7 +155,10 @@ const ALL_CLEAR_BONUS = 1500;
 //
 // Returns null when nothing cleared (so the caller can short-
 // circuit with `if (!result)`), matching TetrisMatchPolicy's
-// idiom. Returns `{ cells, groups }` otherwise.
+// idiom. Returns `{ cells, groups }` otherwise, where each group
+// is `{ color, cells: [{x, y}, ...] }` — the color is needed for
+// the color-count bonus, and the per-group cell-count is needed
+// for the group-size bonus.
 function findClears(board) {
   const rows = board.length;
   const cols = board[0]?.length ?? 0;
@@ -105,7 +181,7 @@ function findClears(board) {
       // to keep the stack budget under control on a fully-connected
       // board (worst case 6 × 12 = 72 cells per group, fine either
       // way, but iterative is the right habit).
-      const group = [];
+      const groupCells = [];
       const stack = [[r, c]];
       while (stack.length) {
         const [cr, cc] = stack.pop();
@@ -113,13 +189,13 @@ function findClears(board) {
         if (visited[cr][cc]) continue;
         if (board[cr][cc] !== color) continue;
         visited[cr][cc] = true;
-        group.push({ x: cc, y: cr });
+        groupCells.push({ x: cc, y: cr });
         stack.push([cr + 1, cc], [cr - 1, cc], [cr, cc + 1], [cr, cc - 1]);
       }
 
-      if (group.length >= MIN_GROUP) {
-        groups.push(group);
-        for (const cell of group) cells.push(cell);
+      if (groupCells.length >= MIN_GROUP) {
+        groups.push({ color, cells: groupCells });
+        for (const cell of groupCells) cells.push(cell);
       }
     }
   }
@@ -128,11 +204,41 @@ function findClears(board) {
   return { cells, groups };
 }
 
-// Null the matched cells. Cell-gravity (dropping the puyos that
-// were sitting on top of the holes we just punched) is the cascade
-// engine's job — we leave the holes in place and the next 'fall'
-// phase fills them.
+// Null the matched cells AND any nuisance puyos directly adjacent
+// to a matched cell — the "splash damage" mechanic that lets the
+// player dig out from under nuisance by clearing groups next to
+// it. Splash damage only fires off MATCHED cells (not chained
+// nuisance clearing more nuisance), so the radius is exactly one
+// step from the original group.
+//
+// Cell-gravity (dropping the puyos that were sitting on top of
+// the holes we just punched) is the cascade engine's job — we
+// leave the holes in place and the next 'fall' phase fills them.
+//
+// Score-wise, splash-damaged nuisance is "free" cleanup: the
+// match policy's applyClearEffects scores by `result.cells.length`
+// (the matched group), which we don't mutate here. The splashed
+// nuisance gets nulled and falls out of the board without
+// affecting the chain payout.
 function removeClears(board, result) {
+  const rows = board.length;
+  const cols = board[0]?.length ?? 0;
+  // Splash first — collect the nuisance neighbors BEFORE nulling
+  // the matched cells so we don't have to track which cells were
+  // matched-vs-already-empty during the lookup.
+  for (const { x, y } of result.cells) {
+    const neighbors = [
+      [x, y - 1],
+      [x, y + 1],
+      [x - 1, y],
+      [x + 1, y],
+    ];
+    for (const [nx, ny] of neighbors) {
+      if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+      if (board[ny][nx] === 'N') board[ny][nx] = null;
+    }
+  }
+  // Then null the matched cells themselves.
   for (const { x, y } of result.cells) {
     board[y][x] = null;
   }
@@ -185,12 +291,16 @@ function applyClearEffects(game, result) {
   game.combo += 1;
   const chainStep = game.combo;
 
-  // Multiplier from the chain power table — see CHAIN_POWER above.
+  // Single-source-of-truth formula:
+  //   cells × CHAIN_BASE × (chainPower + groupBonus + colorBonus) × level
+  //
   // Step 1 pays 1× the cells (so a stand-alone 4-match still feels
-  // worth setting up); step 2 jumps to 8×, then 16×, 32×, … The
-  // exponential growth past step 3 is what turns "I built a real
-  // chain" into a real score event.
-  const points = cleared * CHAIN_BASE * chainPower(chainStep) * game.level;
+  // worth setting up); step 2 jumps to 8×, then 16×, 32×, … plus
+  // group-size and color-count bonuses pile on for big groups and
+  // multi-color steps. The garbage plugin uses the same helper to
+  // convert points → outgoing nuisance, so any tuning lands in
+  // both score and versus pressure simultaneously.
+  const points = pointsForStep(result, chainStep, game.level);
   game.score += points;
 
   // Treat each chain step as one "line" so the existing
@@ -228,10 +338,13 @@ function applyClearEffects(game, result) {
   game.clearTimer     = 0;
 
   // Plugin hook fires AFTER scoring is fully applied. Mirrors
-  // Tetris's onClear ordering. No power-up callback yet — Puyo's
-  // card pool will land in a later step alongside puyo-specific
-  // blessings.
-  game._notifyPlugins('onClear', cleared);
+  // Tetris's onClear ordering. The third arg is the full result
+  // — the garbage plugin needs it to compute outgoing nuisance
+  // via the same pointsForStep formula score uses, so versus
+  // pressure stays in lockstep with displayed score. No power-up
+  // callback yet — Puyo's card pool will land in a later step
+  // alongside puyo-specific blessings.
+  game._notifyPlugins('onClear', cleared, result);
 }
 
 export const PUYO_MATCH = {

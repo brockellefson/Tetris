@@ -311,6 +311,19 @@ canvas { display: block; }
   box-shadow: inset 0 0 12px rgba(176, 38, 255, 0.25);
 }
 
+/* Opponent's field in versus mode. Same border/glow family as
+   .mini so the opponent panel reads as the same UI vocabulary
+   as the next-piece preview, just bigger. The canvas sets its
+   own size in HTML; CSS just provides the surrounding chrome. */
+#opponent-board {
+  background: #0a0014;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 42, 146, 0.4);
+  box-shadow: inset 0 0 12px rgba(176, 38, 255, 0.25);
+  display: block;
+  margin: 0 auto;
+}
+
 .next-list { display: flex; flex-direction: column; gap: 6px; }
 
 /* ---- Start / pause / game-over overlay ---- */
@@ -1562,6 +1575,60 @@ canvas { display: block; }
    The just-submitted row gets the gold .highlight class so the
    player can spot their entry at a glance, mirroring the
    "active option" gold-yellow convention used by .debug-pill.active. */
+/* Match-end menu (Puyo versus). Stacked button group inside the
+   leaderboard-card chrome — same neon panel as the score-submit
+   overlay so the post-match handoff visually rhymes with the
+   end-of-run flow. */
+.versus-end-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+}
+.versus-end-actions .menu-btn {
+  width: 100%;
+}
+/* Disabled state for the REMATCH button — applies via the
+   `disabled` attribute. Dims the gradient + glow so the button
+   reads as "not currently actionable." Cursor signals the same. */
+.versus-end-actions .menu-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  filter: saturate(0.5);
+}
+
+/* Live coordination status — small line under the buttons that
+   reads "WAITING FOR OPPONENT…", "OPPONENT IS READY", or
+   "OPPONENT LEFT" depending on the rematch handshake. Empty
+   string by default; CSS just provides typography. */
+.versus-end-status {
+  margin-top: 14px;
+  min-height: 1.25em;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--neon-cyan);
+  text-shadow: 0 0 8px var(--neon-cyan);
+}
+.versus-end-status.warning {
+  color: var(--neon-pink);
+  text-shadow: 0 0 8px var(--neon-pink);
+}
+
+#versus-end {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 0, 24, 0.7);
+  backdrop-filter: blur(2px);
+}
+#versus-end.hidden { display: none; }
+
 /* Mode-tab strip on top of the browse leaderboard. Two tabs
    (Tetris / Puyo) — each picks which mode's table the rest of the
    overlay reads from. The active tab pops in the same neon-yellow

@@ -43,6 +43,15 @@ export const COLORS = {
   B: '#3a96ff',   // hyperblue
   Y: '#ffd84a',   // citrus yellow
   P: '#c66bff',   // ultraviolet
+  // Nuisance (gray) puyos — dead weight that doesn't form groups
+  // of its own but gets cleared by splash damage when an adjacent
+  // color group pops. Tinted slightly toward blue-violet so it
+  // sits in the synthwave palette instead of looking like a
+  // washed-out hole on the board, but desaturated enough that it
+  // never competes with the five matchable colors for attention.
+  // The flood-fill in PuyoMatchPolicy excludes 'N' from PUYO_COLORS,
+  // so these never trigger a match by themselves.
+  N: '#6f6f88',   // nuisance gray
   GHOST: 'rgba(255,180,255,0.18)',
   // The grid and background lean deep magenta-purple — the iconic
   // "outrun horizon" look. The grid lines are a soft pink-violet so

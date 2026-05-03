@@ -36,11 +36,28 @@ export function isPuyoColor(value) {
   return _PUYO_COLOR_SET.has(value);
 }
 
+// Module-level RNG. Defaults to Math.random for SP runs; versus
+// mode swaps in a seeded PRNG (mulberry32) via setPuyoRng so both
+// tabs produce the same piece sequence from the same seed. The
+// versus run resets us back to Math.random on match end via
+// resetPuyoRng so a follow-up SP run isn't accidentally still
+// running the seeded generator.
+let _rng = Math.random;
+
+export function setPuyoRng(fn) {
+  _rng = (typeof fn === 'function') ? fn : Math.random;
+}
+
+export function resetPuyoRng() {
+  _rng = Math.random;
+}
+
 // Pull one random color. Uniform across PUYO_COLORS — no weighting
 // (Puyo doesn't have a 7-bag analog; pairs are independently
-// uniform).
+// uniform). Uses the swappable _rng so versus runs can drive this
+// from a seeded source.
 export function randomColor() {
-  return PUYO_COLORS[Math.floor(Math.random() * PUYO_COLORS.length)];
+  return PUYO_COLORS[Math.floor(_rng() * PUYO_COLORS.length)];
 }
 
 // Generate a random pair "type" — the opaque value the queue holds.

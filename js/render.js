@@ -788,6 +788,67 @@ function drawFillCursor(ctx, cursor, onEmpty) {
   ctx.restore();
 }
 
+// Render an opponent's full field at compact scale — used by the
+// versus opponent panel. Reads raw board / piece data (NOT a
+// Game instance) so the caller can hand in a snapshot it received
+// over the network without having to synthesize a fake Game.
+//
+// Cell size auto-fits whatever canvas is provided so the same
+// helper works for the mini opponent panel today and any future
+// "view a friend's run" surface.
+export function drawCompactBoard(canvas, ctx, board, piece) {
+  ctx.fillStyle = COLORS.BG;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (!board || !board.length) return;
+
+  const rows = board.length;
+  const cols = board[0]?.length ?? 0;
+  if (!cols) return;
+
+  // Cell size = whichever dimension constrains us. Floor to
+  // integer pixels so cells line up cleanly without subpixel
+  // bleed.
+  const cell = Math.floor(Math.min(
+    canvas.width  / cols,
+    canvas.height / rows,
+  ));
+  if (cell < 2) return;
+  const offX = Math.floor((canvas.width  - cols * cell) / 2);
+  const offY = Math.floor((canvas.height - rows * cell) / 2);
+
+  // Locked cells. Same drawBlock path the main renderer uses —
+  // gradient + glow + COLORS lookup — just at compact scale.
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const kind = board[r][c];
+      if (!kind) continue;
+      drawBlock(ctx, offX + c * cell, offY + r * cell, cell, COLORS[kind]);
+    }
+  }
+
+  // Active piece on top. Uses cellKindAt so pair pieces show
+  // pivot vs satellite colors correctly. Skips cells above the
+  // visible field (y < 0).
+  if (piece) {
+    const s = shapeOf(piece);
+    for (let r = 0; r < s.length; r++) {
+      for (let c = 0; c < s[r].length; c++) {
+        if (!s[r][c]) continue;
+        const x = piece.x + c;
+        const y = piece.y + r;
+        if (y < 0 || x < 0 || x >= cols || y >= rows) continue;
+        drawBlock(
+          ctx,
+          offX + x * cell,
+          offY + y * cell,
+          cell,
+          COLORS[cellKindAt(piece, r, c)],
+        );
+      }
+    }
+  }
+}
+
 // Render a single piece centered inside a small canvas (hold / next preview).
 //
 // The `type` argument is whatever shape the active mode's queue

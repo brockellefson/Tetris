@@ -60,6 +60,14 @@ import cruelCurse    from './curses/cruel.js';
 // cascade.
 import gravityCascadePlugin from './effects/gravity-cascade.js';
 import specialsPlugin       from './specials/index.js';
+// Versus-only plugins — gated to mode 'puyo-versus' so they stay
+// inert in Tetris and SP Puyo. local-vs attaches the match
+// controller right before kicking off a versus run; state-sync
+// then streams snapshots, garbage handles the chain protocol.
+import garbagePlugin        from './modes/puyo/versus/garbage-plugin.js';
+import stateSyncPlugin      from './modes/puyo/versus/state-sync-plugin.js';
+import { setupLocalVersus } from './modes/puyo/versus/local-vs.js';
+import { setupMatchEndMenu } from './modes/puyo/versus/match-end-menu.js';
 
 // -------- DOM lookups owned by main --------
 // Everything else lives inside its module. We keep here only what the
@@ -107,6 +115,8 @@ game.registerPlugin(flipPlugin);
 game.registerPlugin(growthCurse);
 game.registerPlugin(hypedCurse);
 game.registerPlugin(cruelCurse);
+game.registerPlugin(garbagePlugin);
+game.registerPlugin(stateSyncPlugin);
 
 // Engine → HUD/sound hooks. The engine fires these from gameplay
 // events; we route each to its appropriate side-effect.
@@ -289,12 +299,12 @@ mainMenuBtn$.addEventListener('mouseenter', () => {
   if (mainMenuBtn$.classList.contains('hidden')) return;
   playMenuHoverSound();
 });
-mainMenuBtn$.addEventListener('click', () => {
-  if (mainMenuBtn$.classList.contains('hidden')) return;
-  playSelectSound();
-  // Tear down the run BEFORE showing the splash so the brief
-  // single-frame gap between hide-overlay and show-splash doesn't
-  // flash a stale board behind the menu screen.
+// "Return to splash" teardown — extracted so the versus match-end
+// menu's EXIT button can reuse the exact same flow without
+// duplicating the cleanup steps. Tears down the run BEFORE showing
+// the splash so the brief single-frame gap between hide-overlay and
+// show-splash doesn't flash a stale board behind the menu screen.
+function returnToSplash() {
   hud.hideOverlay();
   powerupMenu.clear();
   debug.hideMenu();
@@ -302,12 +312,15 @@ mainMenuBtn$.addEventListener('click', () => {
   hideMainMenuBtn();
   leaderboard.hide();
   game.reset();
-  // Re-show the splash and route audio back. music.playMenu()
-  // crossfades out the in-game theme that pause() faded down, so
-  // the transition matches the original boot fade-in.
   menuScreen$.classList.remove('hidden');
   music.playMenu();
   focusSplashButton(0, { silent: true });
+}
+
+mainMenuBtn$.addEventListener('click', () => {
+  if (mainMenuBtn$.classList.contains('hidden')) return;
+  playSelectSound();
+  returnToSplash();
 });
 
 // Arrow-key navigation across the pause-overlay launcher buttons.
@@ -370,6 +383,24 @@ playBtn$.addEventListener('click', () => startRunInMode(TETRIS_MODE));
 
 playPuyoBtn$.addEventListener('mouseenter', pingHover);
 playPuyoBtn$.addEventListener('click', () => startRunInMode(PUYO_MODE));
+
+// VS LOCAL — Phase 2 fake-versus over BroadcastChannel. Wires its
+// own click handler internally; we just hand it the engine-side
+// dependencies (game, hud, music, splash hide), the match-end
+// menu so it can show YOU WIN / YOU LOSE with REMATCH/EXIT
+// buttons, and returnToSplash so EXIT can tear down the run via
+// the same path the in-game MAIN MENU button uses.
+const matchEndMenu = setupMatchEndMenu();
+setupLocalVersus({
+  game,
+  hud,
+  music,
+  hideMenuScreen,
+  playMenuStartSound,
+  playMenuHoverSound,
+  matchEndMenu,
+  returnToSplash,
+});
 
 // Splash-menu LEADERBOARD button. The button itself is hidden by
 // default in index.html and un-hidden by leaderboard.js only when
@@ -625,8 +656,13 @@ function frame(now) {
   hud.sync(game);
 
   // Game-over overlay (edge-triggered so we don't repaint every frame).
+  // Suppressed in Puyo versus — local-vs surfaces the match-end
+  // menu (REMATCH / EXIT) instead of the standard "PRESS R TO
+  // RESTART" hint. Tetris and SP Puyo keep the legacy overlay.
   if (game.gameOver && !prevGameOver) {
-    hud.showOverlay('GAME OVER', 'PRESS R TO RESTART');
+    if (game.mode?.id !== 'puyo-versus') {
+      hud.showOverlay('GAME OVER', 'PRESS R TO RESTART');
+    }
     prevGameOver = true;
   } else if (!game.gameOver && prevGameOver) {
     prevGameOver = false;
