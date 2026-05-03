@@ -34,4 +34,14 @@ import { PUYO_MODE } from '../mode.js';
 export const PUYO_VERSUS_MODE = {
   ...PUYO_MODE,
   id: 'puyo-versus',
+  // Versus inherits SP's card pool (when it exists) but turns OFF
+  // bundled curses — the opponent's chains are the counterforce in
+  // versus, layering an extra curse on every blessing pick would
+  // dilute the back-and-forth. Empty pool today; replaced when
+  // versus-only cards (Counter Strike, Shield, Garbage Redirect,
+  // etc.) land alongside the SP pool.
+  cards: {
+    ...PUYO_MODE.cards,
+    bundleCurses: false,
+  },
 };

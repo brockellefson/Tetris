@@ -14,7 +14,7 @@
 // and keeps the painted state consistent with whatever the
 // player's main board is doing.
 //
-// setup* returns a teardown handle so local-vs can detach cleanly
+// setup* returns a teardown handle so network-vs can detach cleanly
 // when a match ends.
 
 import { drawCompactBoard } from '../../../render.js';

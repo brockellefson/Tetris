@@ -78,7 +78,7 @@ export function setupMatchEndMenu() {
     overlay$.classList.add('hidden');
   }
 
-  // Update the status line under the buttons. Called by local-vs
+  // Update the status line under the buttons. Called by network-vs
   // as the rematch handshake progresses ("WAITING FOR OPPONENT…",
   // "OPPONENT IS READY", "OPPONENT LEFT", etc.). Pass an empty
   // string to clear. The `warning` flag swaps the color to pink
@@ -116,9 +116,9 @@ export function setupMatchEndMenu() {
     if (rematch$.hasAttribute('disabled')) return;
     playSelectSound();
     const cb = onRematch;
-    // DON'T hide on rematch — local-vs needs to show the
+    // DON'T hide on rematch — network-vs needs to show the
     // "WAITING FOR OPPONENT" status while we wait for the peer's
-    // ready event. local-vs hides the menu when both sides are
+    // ready event. network-vs hides the menu when both sides are
     // confirmed ready and the new match is starting.
     cb?.();
   });

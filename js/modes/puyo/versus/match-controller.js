@@ -6,13 +6,17 @@
 // and whichever transport actually moves bytes between players.
 // The transport is dependency-injected so we can:
 //
-//   • Use BroadcastChannel for two-tabs-on-one-machine fake versus
-//     (Phase 2 — what's wired today).
-//   • Swap to a Supabase Realtime channel later for actual
-//     networked play (Phase 3) without touching the protocol or
-//     the plugin.
+//   • Use SupabaseRealtimeTransport for actual networked play
+//     (what's wired today via setupNetworkVersus).
 //   • Unit-test the protocol with a MockTransport that just relays
 //     to a paired peer in-memory (no browser, no network).
+//
+// An earlier iteration shipped a BroadcastChannelTransport for two-
+// tabs-on-one-machine fake versus; it lived here next to the
+// MatchController. Once the Supabase transport stabilized that
+// devtool earned its retirement — Realtime works fine for two
+// browsers on the same laptop too. The architectural seam stayed:
+// any new transport just needs to implement { send, onMessage, close }.
 //
 // Protocol shape:
 //   { type: string, payload: any }
@@ -65,29 +69,6 @@ export class MatchController {
     this._closed = true;
     this.transport.close?.();
     this._handlers.clear();
-  }
-}
-
-// BroadcastChannel-backed transport for Phase 2 (two-tabs-on-the-
-// same-machine fake versus). Every tab joining the same channel
-// name sees every other tab's posts — N-way relay. Phase 2 assumes
-// exactly two tabs; the handshake (see splash flow) discards
-// duplicate hellos so a third tab opening the same channel doesn't
-// derail an in-progress match.
-//
-// Browser-only — `new BroadcastChannel(...)` doesn't exist in Node,
-// so scripted tests use MockTransport below.
-export class BroadcastChannelTransport {
-  constructor(channelName) {
-    this.channel = new BroadcastChannel(channelName);
-    this.onMessage = null;
-    this.channel.onmessage = (e) => this.onMessage?.(e.data);
-  }
-  send(msg) {
-    this.channel.postMessage(msg);
-  }
-  close() {
-    this.channel.close();
   }
 }
 

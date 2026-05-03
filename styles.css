@@ -1575,6 +1575,115 @@ canvas { display: block; }
    The just-submitted row gets the gold .highlight class so the
    player can spot their entry at a glance, mirroring the
    "active option" gold-yellow convention used by .debug-pill.active. */
+/* Hotkey-draft card strip (Puyo modes). Floats as a fixed
+   horizontal bar at the top of the viewport — three cards laid
+   out side-by-side, each a self-contained pill with the hotkey
+   number, card name, and description stacked vertically inside.
+   Position: fixed so it doesn't shift the play area when it
+   appears mid-match; the player keeps their eyes on the board
+   and just glances up to read the cards. */
+.hotkey-draft {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  pointer-events: none; /* the strip itself doesn't catch clicks */
+}
+.hotkey-draft.hidden { display: none; }
+
+.hotkey-draft-cards {
+  display: flex;
+  flex-direction: row;
+  gap: 14px;
+  pointer-events: auto; /* but the cards inside do */
+}
+
+.hotkey-draft-card {
+  /* Card body — vertical stack of key badge → name → desc.
+     Width sized so a 6-7 word description sits on 2-3 lines
+     comfortably without forcing every word onto its own line. */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  width: 200px;
+  padding: 12px 14px;
+  background: linear-gradient(180deg, rgba(10, 0, 24, 0.92) 0%, rgba(20, 0, 43, 0.95) 100%);
+  border: 1px solid var(--neon-cyan);
+  border-radius: 6px;
+  color: var(--neon-cyan);
+  font-family: 'Orbitron', sans-serif;
+  text-shadow: 0 0 5px var(--neon-cyan);
+  box-shadow:
+    0 0 10px rgba(0, 245, 255, 0.4),
+    inset 0 0 8px rgba(0, 245, 255, 0.12);
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+  animation: hotkey-card-pulse 2.4s ease-in-out infinite;
+}
+
+.hotkey-draft-card:hover,
+.hotkey-draft-card:focus {
+  outline: none;
+  transform: translateY(2px);
+  box-shadow:
+    0 0 18px rgba(0, 245, 255, 0.7),
+    inset 0 0 12px rgba(0, 245, 255, 0.22);
+}
+
+.hotkey-draft-card.flash {
+  /* Picked — gold pop before the strip tears down. */
+  background: linear-gradient(180deg, rgba(40, 30, 0, 0.95) 0%, rgba(20, 13, 0, 0.95) 100%);
+  border-color: var(--neon-yellow);
+  color: var(--neon-yellow);
+  text-shadow: 0 0 10px var(--neon-yellow);
+  box-shadow:
+    0 0 18px rgba(255, 247, 0, 0.7),
+    inset 0 0 12px rgba(255, 247, 0, 0.25);
+  animation: none;
+}
+
+@keyframes hotkey-card-pulse {
+  0%, 100% { box-shadow: 0 0 10px rgba(0, 245, 255, 0.4), inset 0 0 8px rgba(0, 245, 255, 0.12); }
+  50%      { box-shadow: 0 0 18px rgba(0, 245, 255, 0.65), inset 0 0 12px rgba(0, 245, 255, 0.2); }
+}
+
+.hotkey-draft-key {
+  /* Number badge — sits above the name, prominent. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-bottom: 8px;
+  border: 1.5px solid currentColor;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.hotkey-draft-body {
+  min-width: 0;
+}
+
+.hotkey-draft-name {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.hotkey-draft-desc {
+  /* Allow wrapping; we sized the card to fit 2-3 lines. */
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  line-height: 1.4;
+  opacity: 0.8;
+}
+
 /* Match-end menu (Puyo versus). Stacked button group inside the
    leaderboard-card chrome — same neon panel as the score-submit
    overlay so the post-match handoff visually rhymes with the
@@ -1628,6 +1737,134 @@ canvas { display: block; }
   backdrop-filter: blur(2px);
 }
 #versus-end.hidden { display: none; }
+
+/* ============================================================
+   Matchmaking overlay (Puyo versus, network mode)
+   ============================================================
+   Full-viewport modal that pops the moment the player clicks VS
+   NETWORK and stays up until either pairing succeeds or the
+   player cancels. Shares the synthwave card aesthetic with the
+   leaderboard / match-end overlays so the family of "modal over
+   the splash" surfaces reads as one design system.
+
+   z-index 60 sits above #versus-end (50) and #menu-screen (50)
+   but below #leaderboard-* (110) — in practice these never
+   coexist (you can't open the leaderboard while matchmaking),
+   but the ordering is consistent with the rest of the stack.
+   ============================================================ */
+#matchmaking-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 0, 24, 0.75);
+  backdrop-filter: blur(3px);
+  animation: menu-fade 0.2s ease-out;
+}
+#matchmaking-overlay.hidden { display: none; }
+
+.matchmaking-card {
+  background: linear-gradient(180deg, rgba(42, 0, 68, 0.94) 0%, rgba(20, 0, 43, 0.96) 100%);
+  border: 2px solid var(--neon-cyan);
+  border-radius: 8px;
+  padding: 36px 40px 28px;
+  min-width: 340px;
+  max-width: 420px;
+  text-align: center;
+  box-shadow:
+    0 0 14px rgba(0, 245, 255, 0.55),
+    0 0 40px rgba(0, 245, 255, 0.25),
+    inset 0 0 24px rgba(0, 245, 255, 0.08);
+  animation: card-enter 0.35s cubic-bezier(0.2, 0.8, 0.3, 1) backwards;
+}
+
+.matchmaking-title {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 5px;
+  text-transform: uppercase;
+  color: var(--neon-cyan);
+  text-shadow: 0 0 8px currentColor, 0 0 18px currentColor;
+  margin: 0 0 22px;
+}
+
+/* Spinner wrap centers the SVG and gives it room to breathe.
+   The wrap rather than the SVG itself takes the margin so a
+   future "checkmark on success" swap-in keeps the same vertical
+   rhythm. */
+.matchmaking-spinner-wrap {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 22px;
+}
+
+/* The SVG itself rotates; the inner arc is fixed-length and the
+   rotation creates the chase effect. Keeps the animation a single
+   GPU-accelerated transform — no per-frame stroke-dashoffset writes,
+   no layout work. */
+.matchmaking-spinner {
+  width: 64px;
+  height: 64px;
+  animation: matchmaking-spin 1.1s linear infinite;
+  /* Drop-shadow on the SVG itself paints the glow around the arc
+     — softer than stroke-only filters and handles the rotation
+     transparently. */
+  filter: drop-shadow(0 0 6px var(--neon-cyan)) drop-shadow(0 0 14px rgba(0, 245, 255, 0.4));
+}
+
+.matchmaking-spinner-track {
+  fill: none;
+  stroke: rgba(0, 245, 255, 0.18);
+  stroke-width: 4;
+}
+
+.matchmaking-spinner-arc {
+  fill: none;
+  stroke: var(--neon-cyan);
+  stroke-width: 4;
+  stroke-linecap: round;
+  /* 90 of perimeter visible, 200 hidden — perimeter = 2π·20 ≈ 126,
+     so ~70% of the ring is visible and the gap chases around. Tweak
+     the dash to taste; bigger arc = beefier chase, smaller = wispier. */
+  stroke-dasharray: 90 200;
+}
+
+@keyframes matchmaking-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Status line under the spinner. Mirrors versus-end-status in
+   typography so the two overlays read as the same family. The
+   network-vs flow rewrites this text as the state changes
+   ("SEARCHING THE LOBBY…" → "OPPONENT FOUND — CONNECTING…" etc.). */
+.matchmaking-status {
+  min-height: 1.25em;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--neon-cyan);
+  text-shadow: 0 0 8px var(--neon-cyan);
+  margin-bottom: 22px;
+}
+.matchmaking-status.warning {
+  color: var(--neon-pink);
+  text-shadow: 0 0 8px var(--neon-pink);
+}
+
+/* CANCEL button overrides .menu-btn-secondary's default 100% width
+   only by virtue of sitting in a narrower card; no extra rules
+   needed. The button reuses the synthwave secondary palette so it
+   reads as "back out, no commitment" — same vibe as the splash's
+   secondary actions. */
+#matchmaking-cancel-btn {
+  width: 100%;
+}
 
 /* Mode-tab strip on top of the browse leaderboard. Two tabs
    (Tetris / Puyo) — each picks which mode's table the rest of the

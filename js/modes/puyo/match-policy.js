@@ -36,6 +36,7 @@
 
 import { startGravityCascade } from '../../effects/gravity-cascade.js';
 import { isPuyoColor } from './pieces.js';
+import { MENU_SETTLE_MS } from '../../constants.js';
 
 // Minimum group size to count as a clear. Standard Puyo uses 4.
 const MIN_GROUP = 4;
@@ -309,8 +310,36 @@ function applyClearEffects(game, result) {
   // doesn't scale by group count or chain step — leveling should
   // feel like steady progression, not like a dial-up of difficulty
   // that punishes good chains.
+  const linesBefore = game.lines;
   game.lines += 1;
   game.level = Math.floor(game.lines / 10) + 1;
+
+  // Hybrid milestone trigger for the roguelite card menu:
+  //   1. CUMULATIVE — every `milestoneInterval` chain steps the
+  //      player survives earns a card. Mirrors Tetris's "every 5
+  //      lines" exactly — Math.floor diff catches the boundary
+  //      crossing without double-counting.
+  //   2. BONUS — a chain that reaches `chainThreshold` earns one
+  //      extra card on the step that crosses the threshold.
+  //      Fires once per chain regardless of how much further the
+  //      chain goes (the >= 4 trigger only matches when
+  //      chainStep === 4, so step 5+ doesn't keep firing).
+  // Both arm the universal menu-settle so the score / line / chain
+  // banner pops finish before the menu surfaces.
+  const cards = game.mode?.cards;
+  let milestonesEarned = 0;
+  const interval = cards?.milestoneInterval | 0;
+  if (interval > 0) {
+    milestonesEarned += Math.floor(game.lines / interval) - Math.floor(linesBefore / interval);
+  }
+  const threshold = cards?.chainThreshold;
+  if (typeof threshold === 'number' && chainStep === threshold) {
+    milestonesEarned += 1;
+  }
+  game.pendingChoices += milestonesEarned;
+  if (milestonesEarned > 0) {
+    game._menuSettleTimer = MENU_SETTLE_MS;
+  }
 
   // All-clear bonus. Puyo's analog of Tetris's perfect clear —
   // empty the board after a chain and pocket a flat reward.
@@ -341,10 +370,18 @@ function applyClearEffects(game, result) {
   // Tetris's onClear ordering. The third arg is the full result
   // — the garbage plugin needs it to compute outgoing nuisance
   // via the same pointsForStep formula score uses, so versus
-  // pressure stays in lockstep with displayed score. No power-up
-  // callback yet — Puyo's card pool will land in a later step
-  // alongside puyo-specific blessings.
+  // pressure stays in lockstep with displayed score.
   game._notifyPlugins('onClear', cleared, result);
+
+  // Power-up menu callback — fires AFTER plugin onClear so any
+  // freezing plugin started by triggers (none in Puyo today, but
+  // the hook is here for symmetry with Tetris's specials path)
+  // gets to flip its gate before the menu opens. The actual
+  // menu-show is gated through game._isBusy() at the powerup-menu
+  // module — this callback just signals "a card is pending."
+  if (milestonesEarned > 0) {
+    game.onPowerUpChoice?.(game.pendingChoices);
+  }
 }
 
 export const PUYO_MATCH = {

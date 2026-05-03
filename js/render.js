@@ -419,10 +419,19 @@ export function drawBoard(ctx, canvas, game) {
   // the standard sprite-cached path stays the hot path for everything
   // else. The grid lives in the plugin-state bag, owned by the
   // specials plugin's reset hook.
+  //
+  // Color Blind override: when the puyo Color Blind card is active
+  // on the receiver, every locked cell paints with the nuisance
+  // gray instead of its real color for the duration. Active piece,
+  // ghost, and the Next preview all stay normal so the player
+  // isn't dropping completely blind — the disruption is "I can't
+  // read the board," not "I can't see anything."
   const specials = game._pluginState.specials?.boardGrid;
+  const colorBlind = (game._pluginState.colorBlind?.remaining ?? 0) > 0;
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      if (!game.board[r][c]) continue;
+      const kind = game.board[r][c];
+      if (!kind) continue;
       const tag = specials?.[r]?.[c];
       if (tag) {
         const def = SPECIALS_BY_ID[tag];
@@ -431,7 +440,7 @@ export function drawBoard(ctx, canvas, game) {
           continue;
         }
       }
-      drawCell(ctx, c, r, COLORS[game.board[r][c]]);
+      drawCell(ctx, c, r, colorBlind ? COLORS.N : COLORS[kind]);
     }
   }
 

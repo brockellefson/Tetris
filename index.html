@@ -47,7 +47,7 @@
              visibility based on game.mode.id. -->
         <div class="panel hidden" id="opponent-panel">
           <h2>Opponent</h2>
-          <canvas id="opponent-board" width="120" height="240"></canvas>
+          <canvas id="opponent-board" width="100" height="200"></canvas>
         </div>
         <div class="panel" id="hold-panel">
           <h2>Hold</h2>
@@ -73,6 +73,7 @@
             <div class="curse-list" id="curse-list"></div>
           </div>
         </div>
+
       </div>
 
       <div id="board-wrap">
@@ -120,6 +121,16 @@
       <kbd>S</kbd><span>fill</span>
       <kbd>F</kbd><span>flip</span>
     </div>
+
+    <!-- Hotkey-draft card strip (Puyo modes). Three cards
+         populate when game.pendingChoices > 0; the player presses
+         1/2/3 to pick. Hidden by default and in Tetris (which uses
+         the modal). Lives outside the .game grid as a fixed
+         horizontal strip at the top of the viewport so it doesn't
+         shift the play area when it appears mid-match. -->
+    <div class="hotkey-draft hidden" id="hotkey-draft">
+      <div class="hotkey-draft-cards" id="hotkey-draft-cards"></div>
+    </div>
   </div>
 
   <!-- ============================================================
@@ -146,13 +157,14 @@
       <button id="play-puyo-btn" class="menu-btn" type="button">
         <span class="menu-btn-text">PLAY PUYO</span>
       </button>
-      <!-- Local fake-versus, dev-only entry point. Opens a
-           BroadcastChannel and waits for a second tab on the same
-           machine to click the same button. When two tabs are
-           paired both kick off a Puyo run and trade nuisance over
-           the channel. js/main.js owns the handshake. -->
+      <!-- Network versus over Supabase Realtime. Click → presence-
+           based random matchmaking → first paired player gets a
+           live Puyo match. The button auto-hides itself when
+           js/config.js has no Supabase credentials filled in (same
+           gate the leaderboard button uses). js/modes/puyo/versus/
+           network-vs.js owns the matchmaking + handshake. -->
       <button id="play-versus-btn" class="menu-btn menu-btn-secondary" type="button">
-        <span class="menu-btn-text">VS LOCAL</span>
+        <span class="menu-btn-text">VS NETWORK</span>
       </button>
       <!-- Secondary action — opens the global leaderboard browse
            overlay. Hidden gracefully (via JS) when js/config.js has
@@ -266,6 +278,31 @@
     </div>
   </div>
 
+  <!-- Matchmaking overlay (Puyo versus, network mode). Shown the
+       moment the player clicks VS NETWORK and stays up until either
+       a peer is found (auto-hide, match begins) or the player
+       cancels via the CANCEL button / Esc key. Sits above the splash
+       so the title text and CANCEL button are unambiguous. The
+       spinner is two concentric SVG circles — a dim track plus a
+       neon arc that rotates via CSS keyframes; rendering is GPU-
+       accelerated so it stays smooth even while supabase-js is
+       loading and chewing through the WebSocket handshake. -->
+  <div id="matchmaking-overlay" class="hidden">
+    <div class="matchmaking-card">
+      <h2 class="matchmaking-title">FINDING OPPONENT</h2>
+      <div class="matchmaking-spinner-wrap">
+        <svg class="matchmaking-spinner" viewBox="0 0 50 50" aria-hidden="true">
+          <circle class="matchmaking-spinner-track" cx="25" cy="25" r="20" />
+          <circle class="matchmaking-spinner-arc"   cx="25" cy="25" r="20" />
+        </svg>
+      </div>
+      <div class="matchmaking-status" id="matchmaking-status">SEARCHING THE LOBBY…</div>
+      <button id="matchmaking-cancel-btn" class="menu-btn menu-btn-secondary" type="button">
+        <span class="menu-btn-text">CANCEL</span>
+      </button>
+    </div>
+  </div>
+
   <!-- Match-end menu (Puyo versus). Shown when the local game ends
        OR when the opponent's 'i_lost' message lands. Two actions:
        REMATCH starts a fresh versus run on the same channel; EXIT
@@ -283,11 +320,12 @@
           <span class="menu-btn-text">EXIT TO MENU</span>
         </button>
       </div>
-      <!-- Live status line under the buttons. local-vs writes
+      <!-- Live status line under the buttons. network-vs writes
            "WAITING FOR OPPONENT…" once the local player clicks
            REMATCH, "OPPONENT IS READY" when the peer clicks
-           first, or "OPPONENT LEFT" if the peer exits. Empty in
-           the initial post-match state. -->
+           first, or "OPPONENT LEFT" if the peer exits or their
+           Realtime presence vanishes. Empty in the initial post-
+           match state. -->
       <div class="versus-end-status" id="versus-end-status"></div>
     </div>
   </div>
