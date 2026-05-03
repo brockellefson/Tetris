@@ -1230,6 +1230,8 @@ canvas { display: block; }
 .debug-mini-btn:focus-visible,
 .debug-action-btn:focus-visible,
 .debug-close-btn:focus-visible,
+.leaderboard-btn:focus-visible,
+.leaderboard-row:focus-visible,
 #debug-btn:focus-visible {
   outline: 2px solid #fff;
   outline-offset: 2px;
@@ -1271,4 +1273,352 @@ canvas { display: block; }
 @keyframes chisel-pulse {
   0%, 100% { box-shadow: 0 0 12px var(--neon-cyan), 0 0 22px rgba(0, 245, 255, 0.30); }
   50%      { box-shadow: 0 0 22px var(--neon-cyan), 0 0 44px rgba(0, 245, 255, 0.65); }
+}
+
+/* ============================================================
+   Leaderboard — submit overlay + browser overlay
+   ============================================================
+   Two overlays share the same dim-radial backdrop and panel
+   language as the power-up menu and debug menu. The submit card
+   is narrow (a stat readout + a single name field), the browser
+   card is wider (room for the top-25 table). Both are hidden by
+   default and toggled by js/leaderboard.js.
+   ============================================================ */
+
+/* Splash-menu secondary button — sits below the big PLAY button.
+   Smaller padding, violet border to differentiate from the
+   commanding pink-bordered PLAY, but otherwise inherits all the
+   neon glassy styling. */
+.menu-btn-secondary {
+  padding: 12px 36px;
+  font-size: 14px;
+  letter-spacing: 5px;
+  border-color: var(--neon-violet);
+  box-shadow:
+    0 0 8px rgba(176, 38, 255, 0.5),
+    0 0 22px rgba(176, 38, 255, 0.25),
+    inset 0 0 12px rgba(176, 38, 255, 0.2);
+}
+.menu-btn-secondary:hover,
+.menu-btn-secondary:focus {
+  border-color: var(--neon-cyan);
+  box-shadow:
+    0 0 12px var(--neon-cyan),
+    0 0 32px rgba(0, 245, 255, 0.55),
+    0 0 50px rgba(176, 38, 255, 0.35),
+    inset 0 0 14px rgba(0, 245, 255, 0.18);
+}
+
+/* Both overlays — same backdrop / centering as the powerup-menu. */
+#leaderboard-submit,
+#leaderboard-browse {
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at center, rgba(26, 0, 51, 0.85) 0%, rgba(8, 0, 26, 0.92) 100%);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Above #menu-screen (50) and #powerup-menu (100). The leaderboard
+     submit overlay needs to sit above any leftover game-over overlay,
+     and the browse overlay needs to sit above the splash menu when
+     reached from there — z-index 110 covers both cases. */
+  z-index: 110;
+  animation: menu-fade 0.25s ease-out;
+}
+#leaderboard-submit.hidden,
+#leaderboard-browse.hidden { display: none; }
+
+/* Panel — narrow card for the submit form. */
+.leaderboard-card {
+  background: linear-gradient(180deg, rgba(42, 0, 68, 0.92) 0%, rgba(20, 0, 43, 0.95) 100%);
+  border: 2px solid var(--neon-violet);
+  border-radius: 8px;
+  padding: 32px 36px;
+  min-width: 360px;
+  max-width: 420px;
+  text-align: center;
+  box-shadow:
+    0 0 14px rgba(176, 38, 255, 0.5),
+    0 0 40px rgba(176, 38, 255, 0.25),
+    inset 0 0 24px rgba(176, 38, 255, 0.08);
+  animation: card-enter 0.35s cubic-bezier(0.2, 0.8, 0.3, 1) backwards;
+}
+
+/* Wider card for the top-scores browser — needs room for the table. */
+.leaderboard-card-wide {
+  min-width: 560px;
+  max-width: 720px;
+}
+
+.leaderboard-title {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 6px;
+  text-transform: uppercase;
+  color: var(--neon-cyan);
+  text-shadow:
+    0 0 8px currentColor,
+    0 0 18px currentColor;
+  margin-bottom: 20px;
+}
+
+/* End-of-run stat readout in the submit card. Small grid of
+   label/value pairs — same energy as the score panel on the
+   left of the playfield, scaled down. */
+.leaderboard-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px 18px;
+  margin-bottom: 24px;
+  padding: 14px 8px;
+  border-top: 1px solid rgba(176, 38, 255, 0.3);
+  border-bottom: 1px solid rgba(176, 38, 255, 0.3);
+}
+.leaderboard-summary-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.leaderboard-summary-label {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.leaderboard-summary-value {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--neon-cyan);
+  text-shadow: 0 0 6px currentColor;
+}
+
+.leaderboard-name-label {
+  display: block;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.leaderboard-name-input {
+  width: 100%;
+  padding: 10px 14px;
+  background: linear-gradient(180deg, #1a0033 0%, #0f0022 100%);
+  border: 2px solid var(--neon-violet);
+  border-radius: 4px;
+  font-family: 'Orbitron', monospace;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  text-align: center;
+  color: var(--neon-cyan);
+  text-shadow: 0 0 6px var(--neon-cyan);
+  outline: none;
+  box-shadow: inset 0 0 8px rgba(176, 38, 255, 0.25);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.leaderboard-name-input:focus {
+  border-color: var(--neon-cyan);
+  box-shadow:
+    inset 0 0 8px rgba(0, 245, 255, 0.25),
+    0 0 12px rgba(0, 245, 255, 0.5);
+}
+.leaderboard-name-input::placeholder {
+  color: var(--text-dim);
+  opacity: 0.5;
+  letter-spacing: 4px;
+}
+
+/* Status line — "Loading…" / "Saved!" / error messages. Empty by
+   default and collapses to a small reserved height so the card
+   doesn't jump when text appears. */
+.leaderboard-status {
+  min-height: 18px;
+  margin: 14px 0;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.leaderboard-status.error {
+  color: var(--neon-red);
+  text-shadow: 0 0 6px var(--neon-red);
+}
+.leaderboard-status.success {
+  color: var(--neon-yellow);
+  text-shadow: 0 0 6px var(--neon-yellow);
+}
+
+.leaderboard-actions {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+  margin-top: 20px;
+}
+
+/* Buttons — same glassy violet/cyan family as the debug-menu
+   action buttons. The default is the primary "commit" style;
+   .leaderboard-btn-secondary swaps the cyan accent for pink so
+   SKIP / cancel actions read as opt-out. */
+.leaderboard-btn {
+  background: linear-gradient(180deg, #2a0044 0%, #1a0033 100%);
+  border: 2px solid var(--neon-cyan);
+  border-radius: 4px;
+  padding: 10px 22px;
+  cursor: pointer;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--neon-cyan);
+  text-shadow: 0 0 6px currentColor;
+  box-shadow:
+    0 0 8px rgba(0, 245, 255, 0.5),
+    inset 0 0 6px rgba(0, 245, 255, 0.15);
+  transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+.leaderboard-btn:hover,
+.leaderboard-btn:focus {
+  outline: none;
+  transform: translateY(-2px);
+  box-shadow:
+    0 0 14px rgba(0, 245, 255, 0.85),
+    0 0 28px rgba(0, 245, 255, 0.4),
+    inset 0 0 8px rgba(0, 245, 255, 0.25);
+}
+.leaderboard-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: 0 0 4px rgba(0, 245, 255, 0.2);
+}
+.leaderboard-btn-secondary {
+  border-color: var(--neon-pink);
+  color: var(--neon-pink);
+  box-shadow:
+    0 0 8px rgba(255, 42, 146, 0.5),
+    inset 0 0 6px rgba(255, 42, 146, 0.15);
+}
+.leaderboard-btn-secondary:hover,
+.leaderboard-btn-secondary:focus {
+  box-shadow:
+    0 0 14px rgba(255, 42, 146, 0.85),
+    0 0 28px rgba(255, 42, 146, 0.4),
+    inset 0 0 8px rgba(255, 42, 146, 0.25);
+}
+
+/* Top-scores table — clean rows over the violet panel.
+   The just-submitted row gets the gold .highlight class so the
+   player can spot their entry at a glance, mirroring the
+   "active option" gold-yellow convention used by .debug-pill.active. */
+.leaderboard-list-wrap {
+  max-height: 50vh;
+  overflow-y: auto;
+  margin: 16px 0;
+}
+.leaderboard-list {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 12px;
+}
+.leaderboard-list thead th {
+  position: sticky;
+  top: 0;
+  background: linear-gradient(180deg, #2a0044 0%, #1f0036 100%);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--neon-violet);
+  text-align: left;
+}
+.leaderboard-list tbody tr {
+  transition: background-color 0.15s;
+}
+.leaderboard-list tbody tr:nth-child(odd) {
+  background: rgba(176, 38, 255, 0.06);
+}
+.leaderboard-list tbody tr:hover {
+  background: rgba(0, 245, 255, 0.10);
+}
+.leaderboard-list td {
+  padding: 8px 10px;
+  color: var(--text-bright);
+  border-bottom: 1px solid rgba(176, 38, 255, 0.15);
+}
+.lb-col-rank {
+  width: 40px;
+  text-align: center;
+  color: var(--text-dim);
+  font-weight: 700;
+}
+.lb-col-name {
+  font-weight: 700;
+  color: var(--neon-cyan);
+  text-shadow: 0 0 4px currentColor;
+  letter-spacing: 1px;
+}
+.lb-col-score {
+  font-weight: 800;
+  color: var(--neon-pink);
+  text-shadow: 0 0 4px currentColor;
+  text-align: right;
+}
+.lb-col-lines,
+.lb-col-level {
+  text-align: right;
+  width: 60px;
+}
+.lb-col-time {
+  text-align: right;
+  width: 70px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Just-submitted row — gold highlight so the player can find
+   themselves in the list. Same convention as .debug-pill.active. */
+.leaderboard-list tbody tr.highlight {
+  background: rgba(255, 247, 0, 0.10);
+  box-shadow: inset 0 0 8px rgba(255, 247, 0, 0.4);
+}
+.leaderboard-list tbody tr.highlight td {
+  color: var(--neon-yellow);
+  text-shadow: 0 0 6px var(--neon-yellow);
+}
+.leaderboard-list tbody tr.highlight .lb-col-name,
+.leaderboard-list tbody tr.highlight .lb-col-score {
+  color: var(--neon-yellow);
+}
+
+/* Top 3 — subtle rank emphasis without overwhelming the gold
+   highlight. */
+.leaderboard-list tbody tr.rank-1 .lb-col-rank { color: var(--neon-yellow); text-shadow: 0 0 4px var(--neon-yellow); }
+.leaderboard-list tbody tr.rank-2 .lb-col-rank { color: #d8d8e0; text-shadow: 0 0 4px #d8d8e0; }
+.leaderboard-list tbody tr.rank-3 .lb-col-rank { color: #cd7f32; text-shadow: 0 0 4px #cd7f32; }
+
+/* Empty state when there are zero scores yet (or the request
+   failed and we already painted the error into #lb-status). */
+.leaderboard-list tbody:empty::after {
+  content: '';
+  display: block;
+  height: 60px;
 }

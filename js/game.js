@@ -191,6 +191,20 @@ export class Game {
     // game.onPluginIdle. Reset to false here so a fresh game doesn't
     // spuriously fire onPluginIdle on its first tick.
     this._wasBusy = false;
+    // Edge-tracker for the gameOver transition that fires
+    // game.onGameOver. The flag flips true exactly once per run, the
+    // frame after `gameOver` itself flips, and is cleared by reset().
+    // We funnel through this single point because `gameOver` is set
+    // from at least six different sites (spawnNext, holdPiece, the
+    // fill branch of completeClear, junk/rain curse apply hooks,
+    // gravity-cascade), and asking each site to also fire the hook
+    // would inevitably drift out of sync.
+    this._wasGameOver = false;
+    // Wall-clock timestamps for the current run. Set in start();
+    // runEndedAt is captured the moment gameOver edge-fires so the
+    // duration the leaderboard sees is frozen at "death," not "now."
+    this.runStartedAt = 0;
+    this.runEndedAt   = 0;
     // Menu-settle pause — milliseconds remaining before a freshly
     // earned power-up choice is allowed to open its modal. Set to
     // MENU_SETTLE_MS at the bottom of completeClear() (and the
@@ -447,7 +461,22 @@ export class Game {
   start() {
     this.reset();
     this.started = true;
+    // Stamp the run's start time AFTER reset so reset()'s zeroing
+    // doesn't wipe it. runEndedAt stays 0 until tick() captures it
+    // on the gameOver edge.
+    this.runStartedAt = Date.now();
     this.spawnNext();
+  }
+
+  // Total elapsed wall-clock milliseconds for the current run.
+  // Frozen at game-over (uses runEndedAt instead of "now") so the
+  // leaderboard records "how long the run lasted," not "how long
+  // since the run started, including the time spent staring at the
+  // game-over screen."
+  runDurationMs() {
+    if (this.runStartedAt === 0) return 0;
+    const end = this.runEndedAt > 0 ? this.runEndedAt : Date.now();
+    return Math.max(0, end - this.runStartedAt);
   }
 
   togglePause() {
@@ -759,6 +788,19 @@ export class Game {
   // -------- Per-frame update --------
 
   tick(dt) {
+    // Edge-fire onGameOver exactly once per run, the frame after
+    // `gameOver` flips. We do this BEFORE the early-return below so
+    // a `gameOver = true` set by ANY source (spawnNext collision,
+    // holdPiece, fill branch of completeClear, the junk/rain curses,
+    // or the gravity cascade) reliably reaches the hook without each
+    // site needing to fire it themselves. runEndedAt is stamped here
+    // so runDurationMs() reports the at-death elapsed time, not the
+    // ever-growing wall-clock from then on.
+    if (this.gameOver && !this._wasGameOver) {
+      this._wasGameOver = true;
+      this.runEndedAt = Date.now();
+      this.onGameOver?.();
+    }
     if (!this.started || this.paused || this.gameOver) return;
 
     // Plugins tick every frame, even while another plugin is freezing

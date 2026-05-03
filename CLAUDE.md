@@ -11,6 +11,7 @@ Tetris/
 └── js/
     ├── main.js       ← entry point — wires modules, runs the rAF loop, registers plugins
     ├── constants.js  ← board size, colors, gravity table, timing, charge caps
+    ├── config.js     ← runtime config the player edits (Supabase URL + anon key)
     ├── pieces.js     ← tetromino shapes, SRS kick tables, 7-bag (filterable)
     ├── board.js      ← board grid, collision, line-clear (pure functions)
     ├── piece.js      ← spawn / move / rotate / flip / ghost (pure functions)
@@ -20,6 +21,8 @@ Tetris/
     ├── sound.js      ← Web Audio SFX + wireMenuSounds() UI helper
     ├── hud.js        ← score panel, blessing/curse tags, overlays, notifications, chisel-hint banner
     ├── debug.js      ← pause-only developer panel (force blessings/curses, set level)
+    ├── storage.js    ← Supabase REST wrapper for the leaderboard (no Game/DOM imports)
+    ├── leaderboard.js ← splash + post-game-over leaderboard overlays. Reads game state, calls storage.
     ├── menus/
     │   └── powerup.js  ← power-up + bundled-curse choice modal
     ├── powerups/
@@ -183,7 +186,7 @@ Sounds live in `js/sound.js` and are imported by `js/main.js`. If a new cue is n
 | Different keys, gamepad, touch                            | `input.js` only                                                       |
 | Themes, animations, particles                             | `render.js` only                                                      |
 | New sound effects                                         | `sound.js` plus a callback wire-up in `main.js`                       |
-| High-score persistence                                    | New `storage.js` module wrapping `localStorage`                       |
+| High-score persistence                                    | Already wired — see `js/storage.js` (Supabase REST) and `LEADERBOARD.md` for setup. |
 
 The cleanest seam is `game.js` ↔ `render.js`: rendering reads from the game but never writes to it, so you can rip out the renderer entirely without breaking gameplay. The second-cleanest is the plugin bus: a new mechanic that fits the hook contract is a single new file plus one `registerPlugin` line in `main.js`.
 

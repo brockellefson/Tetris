@@ -118,6 +118,91 @@
       <button id="play-btn" class="menu-btn" type="button">
         <span class="menu-btn-text">PLAY</span>
       </button>
+      <!-- Secondary action — opens the global leaderboard browse
+           overlay. Hidden gracefully (via JS) when js/config.js has
+           no Supabase credentials filled in, so a fresh clone of
+           the repo doesn't show a button that goes nowhere. -->
+      <button id="leaderboard-btn" class="menu-btn menu-btn-secondary hidden" type="button">
+        <span class="menu-btn-text">LEADERBOARD</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       Leaderboard — score submission overlay
+       ============================================================
+       Appears once when the run ends, on top of the in-board
+       GAME OVER overlay. The player types a 1–16 char display name
+       and hits SUBMIT (or Enter); the score plus run metadata
+       (lines, level, duration, blessings/curses picked) is POSTed
+       to Supabase. SKIP closes the overlay without saving so the
+       player can restart immediately.
+       Hidden by default; populated and shown by js/leaderboard.js.
+       ============================================================ -->
+  <div id="leaderboard-submit" class="hidden">
+    <div class="leaderboard-card">
+      <h2 class="leaderboard-title">SAVE YOUR SCORE</h2>
+      <div class="leaderboard-summary">
+        <div class="leaderboard-summary-row">
+          <span class="leaderboard-summary-label">Score</span>
+          <span class="leaderboard-summary-value" id="ls-score">0</span>
+        </div>
+        <div class="leaderboard-summary-row">
+          <span class="leaderboard-summary-label">Lines</span>
+          <span class="leaderboard-summary-value" id="ls-lines">0</span>
+        </div>
+        <div class="leaderboard-summary-row">
+          <span class="leaderboard-summary-label">Level</span>
+          <span class="leaderboard-summary-value" id="ls-level">1</span>
+        </div>
+        <div class="leaderboard-summary-row">
+          <span class="leaderboard-summary-label">Time</span>
+          <span class="leaderboard-summary-value" id="ls-time">0:00</span>
+        </div>
+      </div>
+      <label class="leaderboard-name-label" for="ls-name">DISPLAY NAME</label>
+      <input id="ls-name" class="leaderboard-name-input" type="text"
+             maxlength="16" autocomplete="off" spellcheck="false"
+             placeholder="ANON" />
+      <div class="leaderboard-status" id="ls-status"></div>
+      <div class="leaderboard-actions">
+        <button id="ls-skip-btn" class="leaderboard-btn leaderboard-btn-secondary" type="button">SKIP</button>
+        <button id="ls-submit-btn" class="leaderboard-btn" type="button">SUBMIT</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       Leaderboard — top-scores browser overlay
+       ============================================================
+       Reachable from the splash menu's LEADERBOARD button (and from
+       the submit overlay's "View Top Scores" link after a successful
+       post). Loads the top 25 scores from Supabase and renders them
+       as a synthwave-styled table. CLOSE returns to whatever was
+       visible underneath (splash menu, game-over overlay, etc.).
+       ============================================================ -->
+  <div id="leaderboard-browse" class="hidden">
+    <div class="leaderboard-card leaderboard-card-wide">
+      <h2 class="leaderboard-title">TOP SCORES</h2>
+      <div class="leaderboard-status" id="lb-status">Loading…</div>
+      <div class="leaderboard-list-wrap">
+        <table class="leaderboard-list" id="lb-list">
+          <thead>
+            <tr>
+              <th class="lb-col-rank">#</th>
+              <th class="lb-col-name">Name</th>
+              <th class="lb-col-score">Score</th>
+              <th class="lb-col-lines">Lines</th>
+              <th class="lb-col-level">Lv</th>
+              <th class="lb-col-time">Time</th>
+            </tr>
+          </thead>
+          <tbody id="lb-rows"></tbody>
+        </table>
+      </div>
+      <div class="leaderboard-actions">
+        <button id="lb-close-btn" class="leaderboard-btn" type="button">CLOSE</button>
+      </div>
     </div>
   </div>
 

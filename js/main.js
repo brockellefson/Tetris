@@ -33,6 +33,7 @@ import { COLS, ROWS, BLOCK } from './constants.js';
 import { setupHUD } from './hud.js';
 import { setupPowerupMenu } from './menus/powerup.js';
 import { setupDebug } from './debug.js';
+import { setupLeaderboard } from './leaderboard.js';
 // Lifecycle plugins — power-ups and curses that ship hooks (tick /
 // onSpawn / shouldDeferLock / freezesGameplay / interceptInput /
 // modifier hooks). Cards without hooks (Hold, Ghost, Psychic,
@@ -72,6 +73,7 @@ const nextCanvases = [...document.querySelectorAll('.next')];
 const nextCtxs     = nextCanvases.map(c => c.getContext('2d', { alpha: false }));
 const menuScreen$  = document.getElementById('menu-screen');
 const playBtn$     = document.getElementById('play-btn');
+const leaderboardBtn$ = document.getElementById('leaderboard-btn');
 const themeMusic$  = document.getElementById('theme-music');
 
 // -------- Boot --------
@@ -79,6 +81,7 @@ const game = new Game();
 const hud = setupHUD();
 const powerupMenu = setupPowerupMenu(game);
 const debug = setupDebug(game);
+const leaderboard = setupLeaderboard(game);
 
 // Register lifecycle plugins. Order matters in one place: the
 // specials plugin must register BEFORE the gravity cascade so its
@@ -176,6 +179,16 @@ game.onSpecialDestroy = (_kind, cells, points) => {
   hud.notify(`+${points.toLocaleString()}  (${cells} cells)`, 'special', 1500);
 };
 
+// End-of-run leaderboard prompt. Game.tick() edge-fires onGameOver
+// the frame after `gameOver` flips, regardless of which site set
+// the flag (spawn collision, hold-swap collision, fill-restore
+// collision, junk/rain curse application, gravity cascade). The
+// leaderboard module gates internally on isEnabled() — when no
+// Supabase credentials are configured the call is a no-op, so the
+// game-over overlay continues to behave exactly as it did before
+// the leaderboard existed.
+game.onGameOver = () => leaderboard.showSubmit();
+
 // -------- Background theme music --------
 // Plain <audio loop> handles the looping for us — we just drive
 // play / pause from the lifecycle callbacks. Browsers require a
@@ -207,6 +220,11 @@ setupInput(game, {
     // restarted with R while the menu was open).
     debug.hideMenu();
     debug.hideLauncher();
+    // Reset the leaderboard surfaces too — leftover submit/browse
+    // overlays from the previous run shouldn't persist into the
+    // new one. Resets the "already submitted" guard so the next
+    // game over re-opens the submit form cleanly.
+    leaderboard.hide();
   },
   onPause: () => {
     hud.showOverlay('PAUSED', 'PRESS P OR ESC TO RESUME');
@@ -247,6 +265,23 @@ playBtn$.addEventListener('click', () => {
   hideMenuScreen();
   playTheme();
 });
+
+// Splash-menu LEADERBOARD button. The button itself is hidden by
+// default in index.html and un-hidden by leaderboard.js only when
+// Supabase credentials are configured — so a fresh clone of the
+// repo with no config never surfaces a button that would just
+// say "Leaderboard not configured." Hover/click sounds match the
+// secondary-button audio palette established by the debug launcher.
+if (leaderboardBtn$) {
+  leaderboardBtn$.addEventListener('mouseenter', () => {
+    if (leaderboardBtn$.classList.contains('hidden')) return;
+    playMenuHoverSound();
+  });
+  leaderboardBtn$.addEventListener('click', () => {
+    if (leaderboardBtn$.classList.contains('hidden')) return;
+    leaderboard.showBrowse();
+  });
+}
 
 // Keyboard parity with the click path — pressing Enter or Space
 // while the splash is up should also play the start chime, then
