@@ -288,6 +288,7 @@ export function setupLeaderboard(game) {
       bRows$.innerHTML     = '';
       browse$.classList.remove('hidden');
       playMenuOpenSound();
+      requestAnimationFrame(() => bClose$.focus());
       return;
     }
     if (typeof highlightId === 'number') highlightedId = highlightId;
@@ -297,6 +298,12 @@ export function setupLeaderboard(game) {
     bRows$.innerHTML     = '';
     browse$.classList.remove('hidden');
     playMenuOpenSound();
+    // Focus the CLOSE button so it's visually selected (gold focus
+    // ring) and Enter / Space close the overlay without the player
+    // having to mouse over to it. Deferred a frame so the modal-open
+    // animation has already started — focusing mid-paint can cause
+    // the page to scroll oddly.
+    requestAnimationFrame(() => bClose$.focus());
 
     const result = await fetchTopScores(25);
     // The user might close the overlay before the request returns
@@ -360,15 +367,42 @@ export function setupLeaderboard(game) {
     browse$.classList.add('hidden');
   });
 
-  // Esc anywhere while the browse overlay is up closes it. Capture
-  // phase + stopImmediatePropagation so it doesn't leak to gameplay
-  // (which would otherwise pause-toggle on the same key).
+  // Keyboard handling while the browse overlay is up. Capture phase
+  // + stopImmediatePropagation so keys don't leak to the splash
+  // navigator, the gameplay handler, or the "first key starts the
+  // game" fallback in input.js.
+  //   • Esc / Enter / Space  → close
+  //   • Arrow keys / WASD    → re-focus the CLOSE button (the only
+  //                            interactive control on the overlay,
+  //                            so there's nowhere else to navigate
+  //                            to — but the player still expects
+  //                            the gold focus ring to land somewhere
+  //                            when they hit an arrow key)
   document.addEventListener('keydown', (e) => {
     if (!browseOpen()) return;
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      bClose$.click();
+    switch (e.key) {
+      case 'Escape':
+      case 'Enter':
+      case ' ':
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        bClose$.click();
+        return;
+      case 'ArrowUp':
+      case 'ArrowDown':
+      case 'ArrowLeft':
+      case 'ArrowRight':
+      case 'w': case 'W':
+      case 'a': case 'A':
+      case 's': case 'S':
+      case 'd': case 'D':
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (document.activeElement !== bClose$) {
+          bClose$.focus();
+          playCycleSound();
+        }
+        return;
     }
   }, { capture: true });
 

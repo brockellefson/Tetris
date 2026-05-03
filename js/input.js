@@ -34,8 +34,19 @@ export function setupInput(game, callbacks = {}) {
   document.addEventListener('keydown', (e) => {
     if (e.repeat) return;
 
-    // First key press starts the game
+    // First key press starts the game — UNLESS a leaderboard overlay
+    // is up over the splash. The browse overlay (LEADERBOARD button)
+    // owns its own Esc handler in capture phase but lets every other
+    // key fall through; without this guard, an arrow key or letter key
+    // tapped while reading the top scores would silently kick off a
+    // run behind the overlay. The player must close the overlay (Esc
+    // or CLOSE) and click PLAY to actually start.
     if (!game.started && !['F5', 'F12', 'Tab'].includes(e.key)) {
+      const browseOverlay$ = document.getElementById('leaderboard-browse');
+      const submitOverlay$ = document.getElementById('leaderboard-submit');
+      const browseOpen = browseOverlay$ && !browseOverlay$.classList.contains('hidden');
+      const submitOpen = submitOverlay$ && !submitOverlay$.classList.contains('hidden');
+      if (browseOpen || submitOpen) return;
       e.preventDefault();
       game.start();
       callbacks.onStart?.();
