@@ -93,7 +93,7 @@ function sendNow(game) {
 
 // Game.tick early-returns when game.gameOver is true, so the
 // plugin's `tick` hook never fires after death. Expose a manual
-// send so the game-over wiring in local-vs can flush a final
+// send so the game-over wiring in network-vs can flush a final
 // snapshot — otherwise the opponent's last view of our field
 // would be a frame or two before the loss, not the moment of
 // loss itself.

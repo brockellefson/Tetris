@@ -191,9 +191,16 @@ export function setupInput(game, callbacks = {}) {
       return;
     }
 
-    // Power-up choice menu open — game inputs are ignored. The menu
+    // Modal power-up menu open — game inputs are ignored. The menu
     // owns its own keyboard listener (arrows/Enter/1-2-3) in main.js.
-    if (game.pendingChoices > 0) return;
+    //
+    // Hotkey-draft modes (Puyo SP, Puyo versus) intentionally do
+    // NOT freeze input — the player needs to keep moving and
+    // dropping pairs while the card strip is up. The hotkey-draft
+    // module's own capture-phase handler claims 1/2/3 via
+    // stopImmediatePropagation, so those keys never reach this
+    // switch even when the strip is open.
+    if (game.pendingChoices > 0 && game.mode?.cards?.menuStyle !== 'hotkey') return;
 
     switch (e.key) {
       case 'ArrowLeft':

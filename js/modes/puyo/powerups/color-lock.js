@@ -44,7 +44,7 @@
 //   channel. Doesn't touch local state — Color Lock has zero
 //   effect on the player who picks it.
 //
-//   Receiver (the opponent's tab) — local-vs subscribes to the
+//   Receiver (the opponent's tab) — network-vs subscribes to the
 //   'color_lock' event and folds the new lock into
 //   game._pluginState.colorLock.locks. Prefers the sender's hint
 //   if it's not already locked; otherwise picks any unlocked
@@ -94,7 +94,7 @@ export default {
 
   reset(game) {
     // Locks map: { [color]: remainingDrops }. Empty by default;
-    // the receiver-side handler in local-vs.js writes into it on
+    // the receiver-side handler in network-vs.js writes into it on
     // every 'color_lock' event. A color with remaining <= 0 is
     // pruned from the map by decoratePiece, so checking
     // Object.keys(locks).length is a reliable "is anything

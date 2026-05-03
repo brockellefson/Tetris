@@ -150,7 +150,7 @@ export default {
     _pendingIncoming = 0;
     // Stash the game ref so the controller's 'garbage' callback
     // can reach _reduceHookValue without a closure-over-game in
-    // attachMatchController (which fires from local-vs.js, not
+    // attachMatchController (which fires from network-vs.js, not
     // from a plugin hook, and doesn't get game directly).
     _gameRef = game;
   },

@@ -157,13 +157,14 @@
       <button id="play-puyo-btn" class="menu-btn" type="button">
         <span class="menu-btn-text">PLAY PUYO</span>
       </button>
-      <!-- Local fake-versus, dev-only entry point. Opens a
-           BroadcastChannel and waits for a second tab on the same
-           machine to click the same button. When two tabs are
-           paired both kick off a Puyo run and trade nuisance over
-           the channel. js/main.js owns the handshake. -->
+      <!-- Network versus over Supabase Realtime. Click → presence-
+           based random matchmaking → first paired player gets a
+           live Puyo match. The button auto-hides itself when
+           js/config.js has no Supabase credentials filled in (same
+           gate the leaderboard button uses). js/modes/puyo/versus/
+           network-vs.js owns the matchmaking + handshake. -->
       <button id="play-versus-btn" class="menu-btn menu-btn-secondary" type="button">
-        <span class="menu-btn-text">VS LOCAL</span>
+        <span class="menu-btn-text">VS NETWORK</span>
       </button>
       <!-- Secondary action — opens the global leaderboard browse
            overlay. Hidden gracefully (via JS) when js/config.js has
@@ -294,11 +295,12 @@
           <span class="menu-btn-text">EXIT TO MENU</span>
         </button>
       </div>
-      <!-- Live status line under the buttons. local-vs writes
+      <!-- Live status line under the buttons. network-vs writes
            "WAITING FOR OPPONENT…" once the local player clicks
            REMATCH, "OPPONENT IS READY" when the peer clicks
-           first, or "OPPONENT LEFT" if the peer exits. Empty in
-           the initial post-match state. -->
+           first, or "OPPONENT LEFT" if the peer exits or their
+           Realtime presence vanishes. Empty in the initial post-
+           match state. -->
       <div class="versus-end-status" id="versus-end-status"></div>
     </div>
   </div>

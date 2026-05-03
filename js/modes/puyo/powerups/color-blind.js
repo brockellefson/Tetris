@@ -35,7 +35,7 @@
 //   Sender — apply() broadcasts 'color_blind' { placements: 3 }.
 //   No local effect.
 //
-//   Receiver — local-vs subscribes to 'color_blind' and writes
+//   Receiver — network-vs subscribes to 'color_blind' and writes
 //   game._pluginState.colorBlind = { remaining }. This card's
 //   onLock hook decrements that counter once per piece placed
 //   (the lock is the canonical "I just placed a piece" event).
@@ -57,7 +57,7 @@ export default {
 
   // Always available — pickable repeatedly. A second pick during
   // an active blind just refreshes the timer back to full
-  // (overwrite via the receiver subscription in local-vs).
+  // (overwrite via the receiver subscription in network-vs).
   available: () => true,
 
   apply(_game) {

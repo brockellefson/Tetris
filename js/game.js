@@ -850,8 +850,16 @@ export class Game {
     // onPluginIdle, which main.js routes to showNext).
     if (this._isFrozenByPlugin()) return;
 
-    // Freeze gameplay while the power-up choice menu is open.
-    if (this.pendingChoices > 0) return;
+    // Freeze gameplay while a MODAL power-up choice menu is open.
+    // Hotkey-draft modes (Puyo SP, Puyo versus) opt out — the strip
+    // appears below the score panel and the game keeps running.
+    // Picking is optional in hotkey modes; the strip stays up across
+    // many spawns until the player hits 1/2/3 (or never picks at
+    // all, which is fine — the choice just sits there). This also
+    // matters for versus specifically: the opponent's tab keeps
+    // playing regardless, so pausing on a choice would just rob
+    // the local player of seconds while the opponent garbage-pumps.
+    if (this.pendingChoices > 0 && this.mode?.cards?.menuStyle !== 'hotkey') return;
 
     // Line-clear animation takes precedence — pause gravity & input
     // while the cleared rows flash and wipe.

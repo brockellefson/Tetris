@@ -62,13 +62,13 @@ import cruelCurse    from './curses/cruel.js';
 import gravityCascadePlugin from './effects/gravity-cascade.js';
 import specialsPlugin       from './specials/index.js';
 // Versus-only plugins — gated to mode 'puyo-versus' so they stay
-// inert in Tetris and SP Puyo. local-vs attaches the match
+// inert in Tetris and SP Puyo. network-vs attaches the match
 // controller right before kicking off a versus run; state-sync
 // then streams snapshots, garbage handles the chain protocol.
-import garbagePlugin        from './modes/puyo/versus/garbage-plugin.js';
-import stateSyncPlugin      from './modes/puyo/versus/state-sync-plugin.js';
-import { setupLocalVersus } from './modes/puyo/versus/local-vs.js';
-import { setupMatchEndMenu } from './modes/puyo/versus/match-end-menu.js';
+import garbagePlugin          from './modes/puyo/versus/garbage-plugin.js';
+import stateSyncPlugin        from './modes/puyo/versus/state-sync-plugin.js';
+import { setupNetworkVersus } from './modes/puyo/versus/network-vs.js';
+import { setupMatchEndMenu }  from './modes/puyo/versus/match-end-menu.js';
 // Puyo card-pool plugins. Each card carries lifecycle hooks
 // (decoratePiece for Lucky Pair, modifyIncomingGarbage for
 // Shield + Thorns) so they need plugin registration. modes-gated
@@ -417,14 +417,16 @@ playBtn$.addEventListener('click', () => startRunInMode(TETRIS_MODE));
 playPuyoBtn$.addEventListener('mouseenter', pingHover);
 playPuyoBtn$.addEventListener('click', () => startRunInMode(PUYO_MODE));
 
-// VS LOCAL — Phase 2 fake-versus over BroadcastChannel. Wires its
-// own click handler internally; we just hand it the engine-side
+// VS NETWORK — Supabase-Realtime random matchmaking. Wires its own
+// click handler internally; we just hand it the engine-side
 // dependencies (game, hud, music, splash hide), the match-end
 // menu so it can show YOU WIN / YOU LOSE with REMATCH/EXIT
 // buttons, and returnToSplash so EXIT can tear down the run via
-// the same path the in-game MAIN MENU button uses.
+// the same path the in-game MAIN MENU button uses. The button
+// auto-hides itself when no Supabase credentials are configured
+// (same gate the leaderboard button uses).
 const matchEndMenu = setupMatchEndMenu();
-setupLocalVersus({
+setupNetworkVersus({
   game,
   hud,
   music,
@@ -689,7 +691,7 @@ function frame(now) {
   hud.sync(game);
 
   // Game-over overlay (edge-triggered so we don't repaint every frame).
-  // Suppressed in Puyo versus — local-vs surfaces the match-end
+  // Suppressed in Puyo versus — network-vs surfaces the match-end
   // menu (REMATCH / EXIT) instead of the standard "PRESS R TO
   // RESTART" hint. Tetris and SP Puyo keep the legacy overlay.
   if (game.gameOver && !prevGameOver) {

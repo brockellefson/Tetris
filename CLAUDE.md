@@ -23,6 +23,26 @@ Tetris/
     ├── debug.js      ← pause-only developer panel (force blessings/curses, set level)
     ├── storage.js    ← Supabase REST wrapper for the leaderboard (no Game/DOM imports)
     ├── leaderboard.js ← splash + post-game-over leaderboard overlays. Reads game state, calls storage.
+    ├── modes/puyo/versus/
+    │   ├── network-vs.js          ← splash-click → matchmaking → match
+    │   │                            lifecycle (the only thing main.js
+    │   │                            calls; everything else is internal).
+    │   ├── matchmaking.js         ← Realtime-Presence lobby; resolves
+    │   │                            to { matchId, peerId } when paired.
+    │   ├── supabase-client.js     ← lazy singleton Supabase client
+    │   │                            (dynamically imports supabase-js
+    │   │                            from esm.sh on first use; only
+    │   │                            paid for when VS NETWORK clicked).
+    │   ├── supabase-transport.js  ← MatchController-compatible wrapper
+    │   │                            over a Realtime broadcast channel,
+    │   │                            with peer_left synthetic events
+    │   │                            from presence-leave.
+    │   ├── match-controller.js    ← typed pub/sub over any transport.
+    │   ├── garbage-plugin.js      ← outgoing chains → 'garbage' events;
+    │   │                            inbound 'garbage' → dropNuisance.
+    │   ├── state-sync-plugin.js   ← throttled board snapshots → 'state'.
+    │   ├── opponent-view.js       ← paints incoming snapshots.
+    │   └── match-end-menu.js      ← REMATCH / EXIT modal.
     ├── menus/
     │   └── powerup.js  ← power-up + bundled-curse choice modal
     ├── powerups/
@@ -189,6 +209,7 @@ Sounds live in `js/sound.js` and are imported by `js/main.js`. If a new cue is n
 | Themes, animations, particles                             | `render.js` only                                                      |
 | New sound effects                                         | `sound.js` plus a callback wire-up in `main.js`                       |
 | High-score persistence                                    | Already wired — see `js/storage.js` (Supabase REST) and `LEADERBOARD.md` for setup. |
+| Networked versus (Puyo)                                   | Already wired — see `js/modes/puyo/versus/network-vs.js` (splash flow) and `VERSUS.md` for protocol notes. New inter-player events: `sendVersusMessage(type, payload)` on the sender, `matchController.on(type, …)` in `network-vs.js` on the receiver. |
 
 The cleanest seam is `game.js` ↔ `render.js`: rendering reads from the game but never writes to it, so you can rip out the renderer entirely without breaking gameplay. The second-cleanest is the plugin bus: a new mechanic that fits the hook contract is a single new file plus one `registerPlugin` line in `main.js`.
 
