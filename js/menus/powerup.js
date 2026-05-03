@@ -25,8 +25,12 @@
 // in CLAUDE.md → "UI conventions".
 // ============================================================
 
-import { pickChoices } from '../powerups/index.js';
-import { pickCurseChoices } from '../curses/index.js';
+// Card pickers and bundle-curses flag come off the active mode
+// (game.mode.cards), so each mode owns its roguelite vocabulary
+// without the menu needing to know what's in it. Tetris's bundle
+// re-exports its existing pickChoices/pickCurseChoices; Puyo's
+// stub returns empty arrays for now and the menu short-circuits
+// gracefully.
 import { playCycleSound, playSelectSound, playMenuOpenSound } from '../sound.js';
 
 // Power-up / curse pairings that exactly cancel each other when
@@ -172,12 +176,27 @@ export function setupPowerupMenu(game) {
     // menu-settle/any future modal for free.
     if (game.gameOver) return;
     if (game._isBusy()) return;
-    const powerups = pickChoices(game, 3);
+    const cards = game.mode?.cards;
+    // Mode opted into a different UI surface (Puyo uses hotkey
+    // draft). Hand off cleanly — the hotkey-draft module will
+    // pop on the same onPowerUpChoice hook.
+    if (cards?.menuStyle && cards.menuStyle !== 'modal') return;
+    const powerups = cards?.pickPowerups?.(game, 3) ?? [];
     if (powerups.length === 0) {
+      // Empty pool (Puyo SP/versus today before the card pool
+      // lands). Drain pending choices so the engine unfreezes
+      // and the run continues normally.
       game.pendingChoices = 0;
       return;
     }
-    const curses = pickCurseChoices(game, powerups.length);
+    // Curses bundle alongside the powerups when the active mode
+    // opts in (Tetris yes, Puyo versus no). When bundleCurses is
+    // false or the curse pool is empty, each card lands as a
+    // pure blessing — the noCurse path the Dispell card already
+    // exercises.
+    const curses = cards?.bundleCurses
+      ? (cards.pickCurses?.(game, powerups.length) ?? [])
+      : [];
 
     // Apply the canceling-pair swap rules in place.
     for (const { powerup: pId, curse: cId } of CANCELING_PAIRS) {
@@ -192,10 +211,14 @@ export function setupPowerupMenu(game) {
     const choices = powerups.map((powerup, i) => ({
       powerup,
       // Blessings flagged `noCurse` (e.g. Dispell) carry no bundled
-      // curse — picking them is a pure positive. Otherwise fall back
-      // gracefully if somehow there are fewer eligible curses than
-      // power-ups (defensive — all curses are always-available today).
-      curse: powerup.noCurse ? null : (curses[i % Math.max(curses.length, 1)] ?? null),
+      // curse — picking them is a pure positive. Same goes for any
+      // mode that opted out of bundleCurses (puyo versus). Falls
+      // back gracefully if somehow there are fewer eligible curses
+      // than power-ups (defensive — all Tetris curses are always
+      // available today).
+      curse: (powerup.noCurse || curses.length === 0)
+        ? null
+        : (curses[i % curses.length] ?? null),
     }));
     buildChoiceMenu({
       choices,

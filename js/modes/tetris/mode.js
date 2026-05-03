@@ -17,6 +17,8 @@ import { DEFAULT_LAYOUT } from '../../layout.js';
 import { GRAVITY } from '../../constants.js';
 import { TETRIS_PIECES } from './piece-policy.js';
 import { TETRIS_MATCH }  from './match-policy.js';
+import { pickChoices }      from '../../powerups/index.js';
+import { pickCurseChoices } from '../../curses/index.js';
 
 export const TETRIS_MODE = {
   id:     'tetris',
@@ -34,5 +36,25 @@ export const TETRIS_MODE = {
   gravityTable: GRAVITY,
   hud: {
     progressLabel: 'Lines',
+  },
+  // Roguelite card pool. The menu reads pickPowerups / pickCurses
+  // off the active mode rather than importing them directly, so
+  // adding a parallel pool for a different mode is one bundle
+  // edit. milestoneInterval + chainThreshold tune when the menu
+  // surfaces a card. bundleCurses true means each blessing pick
+  // also delivers a random curse — Tetris's signature risk-reward
+  // shape. (Puyo versus turns this off; the opponent IS the
+  // counterforce in versus.)
+  cards: {
+    pickPowerups:      pickChoices,
+    pickCurses:        pickCurseChoices,
+    bundleCurses:      true,
+    milestoneInterval: 5,    // every 5 lines → 1 card (historic)
+    chainThreshold:    null, // Tetris has no chain concept
+    // Modal pick — pauses the game, player deliberates over a
+    // big card spread. Tetris's pacing rewards thoughtful picks;
+    // hotkey draft would feel rushed in a mode where one Tetris
+    // can earn 2 cards.
+    menuStyle: 'modal',
   },
 };

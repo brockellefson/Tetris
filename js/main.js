@@ -34,6 +34,7 @@ import {
 import { BLOCK } from './constants.js';
 import { setupHUD } from './hud.js';
 import { setupPowerupMenu } from './menus/powerup.js';
+import { setupHotkeyDraft } from './menus/hotkey-draft.js';
 import { setupDebug } from './debug.js';
 import { setupLeaderboard } from './leaderboard.js';
 import { setupMusic } from './music.js';
@@ -68,6 +69,17 @@ import garbagePlugin        from './modes/puyo/versus/garbage-plugin.js';
 import stateSyncPlugin      from './modes/puyo/versus/state-sync-plugin.js';
 import { setupLocalVersus } from './modes/puyo/versus/local-vs.js';
 import { setupMatchEndMenu } from './modes/puyo/versus/match-end-menu.js';
+// Puyo card-pool plugins. Each card carries lifecycle hooks
+// (decoratePiece for Lucky Pair, modifyIncomingGarbage for
+// Shield + Thorns) so they need plugin registration. modes-gated
+// to puyo / puyo-versus so they no-op outside the right context.
+// Order matters for the modifyIncomingGarbage chain: Shield runs
+// before Thorns so absorbed garbage isn't reflected.
+import luckyDrawCard  from './modes/puyo/powerups/lucky-draw.js';
+import shieldCard     from './modes/puyo/powerups/shield.js';
+import thornsCard     from './modes/puyo/powerups/thorns.js';
+import colorLockCard  from './modes/puyo/powerups/color-lock.js';
+import colorBlindCard from './modes/puyo/powerups/color-blind.js';
 
 // -------- DOM lookups owned by main --------
 // Everything else lives inside its module. We keep here only what the
@@ -97,6 +109,7 @@ const themeMusic2$ = document.getElementById('theme-music-2');
 const game = new Game();
 const hud = setupHUD();
 const powerupMenu = setupPowerupMenu(game);
+const hotkeyDraft = setupHotkeyDraft(game);
 const debug = setupDebug(game);
 const leaderboard = setupLeaderboard(game);
 
@@ -117,6 +130,11 @@ game.registerPlugin(hypedCurse);
 game.registerPlugin(cruelCurse);
 game.registerPlugin(garbagePlugin);
 game.registerPlugin(stateSyncPlugin);
+game.registerPlugin(luckyDrawCard);
+game.registerPlugin(shieldCard);
+game.registerPlugin(thornsCard);
+game.registerPlugin(colorLockCard);
+game.registerPlugin(colorBlindCard);
 
 // Engine → HUD/sound hooks. The engine fires these from gameplay
 // events; we route each to its appropriate side-effect.
@@ -142,6 +160,10 @@ game.onCombo        = (n)   => hud.notify(`COMBO × ${n}`, 'combo');
 game.onChain        = (n)   => hud.notify(`${n}-CHAIN!`, 'combo');
 game.onTetris       = (b2b) => hud.notify(b2b ? 'BACK-TO-BACK TETRIS' : 'TETRIS', b2b ? 'b2b' : 'tetris', 1900);
 game.onPerfectClear = ()    => hud.notify('PERFECT CLEAR', 'perfect', 2100);
+// Lucky Draw banner — fires when a charged Lucky Draw piece
+// spawns. Reuses the tetris-clear notification style (gold +
+// glow) since both signal "rare moment, savor it."
+game.onLuckyDraw    = ()    => hud.notify('LUCKY DRAW!', 'tetris', 1500);
 // Power-up choice menu surfacing. Two callbacks feed showNext:
 //   onPowerUpChoice — fired when a milestone earns a new pick.
 //   onPluginIdle    — fired by Game when "any plugin freezing OR
@@ -150,8 +172,18 @@ game.onPerfectClear = ()    => hud.notify('PERFECT CLEAR', 'perfect', 2100);
 //                     named completion callbacks (onChiselComplete /
 //                     onFillComplete / onGravityComplete) — adding a
 //                     new modal plugin gets menu-resume for free.
-game.onPowerUpChoice = () => powerupMenu.showNext();
-game.onPluginIdle    = () => powerupMenu.showNext();
+// Multiplex the choice / idle hooks across both menu surfaces.
+// The modal opens only when game.mode.cards.menuStyle === 'modal'
+// (Tetris); the hotkey draft opens only when it's 'hotkey' (Puyo
+// modes). Each self-gates internally on every call, so adding a
+// third menu surface later is one more line in the chain — no
+// caller-side mode branching.
+function fanoutMenuShowNext() {
+  powerupMenu.showNext();
+  hotkeyDraft.showNext();
+}
+game.onPowerUpChoice = fanoutMenuShowNext;
+game.onPluginIdle    = fanoutMenuShowNext;
 // Curse FX notifications — the row drop / rain spray would feel
 // silent without a blip, so we surface a small notification.
 game.onJunk = (n) => hud.notify(n > 1 ? `JUNK +${n}` : 'JUNK', 'b2b', 1400);
@@ -244,6 +276,7 @@ setupInput(game, {
   onStart: () => {
     hud.hideOverlay();
     powerupMenu.clear();
+    hotkeyDraft.clear();
     hideMenuScreen();
     music.playGame();
     // A fresh start hides any leftover debug surfaces (e.g. user

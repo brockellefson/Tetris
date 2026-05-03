@@ -48,7 +48,7 @@ import {
   sendFinalState,
 } from './state-sync-plugin.js';
 import { setupOpponentView } from './opponent-view.js';
-import { setPuyoRng, resetPuyoRng } from '../pieces.js';
+import { setPuyoRng, resetPuyoRng, PUYO_COLORS } from '../pieces.js';
 import { mulberry32, randomSeed } from '../../../util/rng.js';
 
 const CHANNEL_NAME = 'stackoverflow-puyo-vs-local';
@@ -179,6 +179,65 @@ export function setupLocalVersus({
     if (opponentCanvas) {
       opponentView = setupOpponentView(matchController, opponentCanvas);
     }
+
+    // Card-driven inter-player events. These write into plugin-
+    // state slots that the relevant card plugins read from their
+    // lifecycle hooks. Centralizing the receivers here (rather
+    // than in each card file) keeps the controller subscription
+    // surface in one place; cards just pick the right slot to
+    // watch on their own side.
+    matchController.on('color_lock', (payload) => {
+      if (!payload) return;
+      const drops = Math.max(0, payload.drops | 0);
+      if (drops <= 0) return;
+      // Defensive — slot may not exist yet (the color-lock
+      // plugin's reset hook seeds it on game.start, which fires
+      // a few lines below). Lazy-create here so an event
+      // arriving milliseconds before reset doesn't get dropped.
+      const slot = game._pluginState.colorLock ??= { locks: {} };
+      if (!slot.locks) slot.locks = {};
+
+      // Pick the color this event will lock. The sender's
+      // payload.color is a hint; the receiver makes the final
+      // call so each pick reliably adds a NEW lock when one is
+      // available, regardless of what the sender happened to
+      // roll. Stack semantics:
+      //   1. If the hint isn't already locked, honor it.
+      //   2. Otherwise, lock any color not yet in the map.
+      //   3. Otherwise (all 5 already locked), refresh a
+      //      random already-locked color's window. The all-
+      //      locked junk-pair state holds either way; the
+      //      refresh just postpones the moment one of the
+      //      timers would have lapsed (timers are frozen during
+      //      all-locked anyway, so this is a no-op until
+      //      something else lifts a lock — kept for forward-
+      //      compat in case future cards drop a lock early).
+      const lockedColors = Object.keys(slot.locks).filter(c => slot.locks[c] > 0);
+      const lockedSet    = new Set(lockedColors);
+      let target = null;
+      if (payload.color && PUYO_COLORS.includes(payload.color) && !lockedSet.has(payload.color)) {
+        target = payload.color;
+      } else {
+        const unlocked = PUYO_COLORS.filter(c => !lockedSet.has(c));
+        if (unlocked.length > 0) {
+          target = unlocked[Math.floor(Math.random() * unlocked.length)];
+        } else {
+          target = lockedColors[Math.floor(Math.random() * lockedColors.length)];
+        }
+      }
+      slot.locks[target] = drops;
+    });
+
+    matchController.on('color_blind', (payload) => {
+      if (!payload) return;
+      const slot = game._pluginState.colorBlind ??= { remaining: 0 };
+      // Overwrite, don't add — a second Color Blind during an
+      // active one refreshes the window rather than stacking
+      // duration. Keeps the disruption time-bounded; otherwise
+      // a heavy color-blind picker could grey out the opponent
+      // for entire matches.
+      slot.remaining = Math.max(0, payload.placements | 0);
+    });
 
     // Seed the puyo RNG so both tabs produce the same piece
     // sequence — the cornerstone of versus fairness. Same seed

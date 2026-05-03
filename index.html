@@ -47,7 +47,7 @@
              visibility based on game.mode.id. -->
         <div class="panel hidden" id="opponent-panel">
           <h2>Opponent</h2>
-          <canvas id="opponent-board" width="120" height="240"></canvas>
+          <canvas id="opponent-board" width="100" height="200"></canvas>
         </div>
         <div class="panel" id="hold-panel">
           <h2>Hold</h2>
@@ -73,6 +73,7 @@
             <div class="curse-list" id="curse-list"></div>
           </div>
         </div>
+
       </div>
 
       <div id="board-wrap">
@@ -119,6 +120,16 @@
       <kbd>A</kbd><span>chisel</span>
       <kbd>S</kbd><span>fill</span>
       <kbd>F</kbd><span>flip</span>
+    </div>
+
+    <!-- Hotkey-draft card strip (Puyo modes). Three cards
+         populate when game.pendingChoices > 0; the player presses
+         1/2/3 to pick. Hidden by default and in Tetris (which uses
+         the modal). Lives outside the .game grid as a fixed
+         horizontal strip at the top of the viewport so it doesn't
+         shift the play area when it appears mid-match. -->
+    <div class="hotkey-draft hidden" id="hotkey-draft">
+      <div class="hotkey-draft-cards" id="hotkey-draft-cards"></div>
     </div>
   </div>
 

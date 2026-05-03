@@ -66,13 +66,22 @@ export function attachMatchController(controller) {
   // Wire the inbound side. We can't subscribe in init() because
   // init runs at registerPlugin time (boot) and the controller
   // doesn't exist yet — splash flow attaches mid-run.
+  //
+  // Each incoming 'garbage' event runs through the
+  // modifyIncomingGarbage plugin hook chain BEFORE landing in
+  // the queue. Cards (Shield, Thorns) subscribe to the hook to
+  // halve the count or reflect a portion back; the chain returns
+  // the final landing count. The chain runs in plugin
+  // registration order — Shield decides to absorb first, then
+  // Thorns reflects whatever's left. Tweaking the order is a
+  // matter of registerPlugin order in main.js.
   controller.on('garbage', (payload) => {
-    // Inbound stash; the plugin drains this on the next onSpawn.
-    // Module-level scratch lives at `_pendingIncoming` since reads
-    // from outside the plugin's own state slot don't cleanly
-    // serialize through reset/restore anyway — the queue is meant
-    // to live exactly as long as the active connection.
-    _pendingIncoming += Math.max(0, payload?.count | 0);
+    let count = Math.max(0, payload?.count | 0);
+    if (_gameRef && typeof _gameRef._reduceHookValue === 'function') {
+      count = _gameRef._reduceHookValue('modifyIncomingGarbage', count);
+      count = Math.max(0, count | 0);
+    }
+    _pendingIncoming += count;
   });
 }
 
@@ -90,6 +99,34 @@ export function detachMatchController() {
 // undo nuisance the opponent already sent. (Whoops is Tetris-only
 // today, so this is forward-compat caution.)
 let _pendingIncoming = 0;
+
+// Game ref stashed by the plugin's reset hook so the
+// match-controller subscription (set up in attachMatchController,
+// which doesn't take a game arg) can still reach Game's plugin
+// hook chain — modifyIncomingGarbage runs through every card
+// that subscribes, letting Shield / Thorns mutate the incoming
+// count before it lands in the queue.
+let _gameRef = null;
+
+// Generic versus-message sender — single seam for cards that
+// need to push messages onto the channel without reaching for
+// the controller themselves. sendGarbageNow is a thin wrapper
+// over this. Color Lock and any future inter-player card use it
+// directly with their own event types.
+export function sendVersusMessage(type, payload) {
+  if (!_matchController) return;
+  _matchController.send(type, payload);
+}
+
+// Sends a 'garbage' message immediately. Cards that need to push
+// extra garbage onto the wire mid-effect (Thorns reflecting 25%
+// of incoming back to the opponent) import this helper rather
+// than calling sendVersusMessage directly — keeps the count
+// validation in one place.
+export function sendGarbageNow(count) {
+  if (count <= 0) return;
+  sendVersusMessage('garbage', { count });
+}
 
 export default {
   id: 'garbage',
@@ -111,6 +148,11 @@ export default {
     // Reset module-level counters too — a fresh game means the
     // previous match's accounting is dead.
     _pendingIncoming = 0;
+    // Stash the game ref so the controller's 'garbage' callback
+    // can reach _reduceHookValue without a closure-over-game in
+    // attachMatchController (which fires from local-vs.js, not
+    // from a plugin hook, and doesn't get game directly).
+    _gameRef = game;
   },
 
   // onClear fires once per chain step (Puyo) — accumulate outgoing.
