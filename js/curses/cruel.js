@@ -17,6 +17,9 @@ export default {
   id: 'curse-cruel',
   name: 'Cruel',
   description: 'No line pieces for this level.',
+  // Tetris-only — there is no I-piece in Puyo, and the
+  // allowsBagPiece veto threads through Tetris's 7-bag refill.
+  modes: ['tetris'],
   available: () => true,
   apply: (game) => {
     game.curses.cruelUntilLevel = Math.max(

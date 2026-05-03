@@ -140,6 +140,11 @@ export default {
   id: 'chisel',
   name: 'Chisel',
   description: 'Press A to remove any 1×1 block. 5-line cooldown.',
+  // Tetris-only — single-cell removal makes sense for Puyo too,
+  // but the cell-pick UX and onCellRemoved scoring path are
+  // wired into Tetris's specials/blessing system. A Puyo chisel
+  // would ship as its own plugin with the right bookkeeping.
+  modes: ['tetris'],
   available: (game) => !game.unlocks.chisel,
   apply: (game) => {
     game.unlocks.chisel = true;

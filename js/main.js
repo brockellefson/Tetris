@@ -20,21 +20,24 @@
 // ============================================================
 
 import { Game } from './game.js';
+import { TETRIS_MODE, PUYO_MODE } from './modes/index.js';
 import { drawBoard, drawMini } from './render.js';
 import { setupInput } from './input.js';
 import {
   playLockSound, playClearSound, playCycleSound, playMenuHoverSound,
-  playMenuStartSound, playChiselSound, playFillSound, playFlipSound,
+  playMenuStartSound, playSelectSound,
+  playChiselSound, playFillSound, playFlipSound,
   playSpecialTriggerSound, playSpecialSpawnSound,
   playBombSound, playLightningSound,
   playBombSpawnSound, playLightningSpawnSound,
 } from './sound.js';
-import { COLS, ROWS, BLOCK } from './constants.js';
+import { BLOCK } from './constants.js';
 import { setupHUD } from './hud.js';
 import { setupPowerupMenu } from './menus/powerup.js';
 import { setupDebug } from './debug.js';
 import { setupLeaderboard } from './leaderboard.js';
 import { setupMusic } from './music.js';
+import { wireArrowNav } from './menus/keynav.js';
 // Lifecycle plugins — power-ups and curses that ship hooks (tick /
 // onSpawn / shouldDeferLock / freezesGameplay / interceptInput /
 // modifier hooks). Cards without hooks (Hold, Ghost, Psychic,
@@ -74,7 +77,10 @@ const nextCanvases = [...document.querySelectorAll('.next')];
 const nextCtxs     = nextCanvases.map(c => c.getContext('2d', { alpha: false }));
 const menuScreen$  = document.getElementById('menu-screen');
 const playBtn$     = document.getElementById('play-btn');
+const playPuyoBtn$ = document.getElementById('play-puyo-btn');
 const leaderboardBtn$ = document.getElementById('leaderboard-btn');
+const mainMenuBtn$ = document.getElementById('main-menu-btn');
+const debugBtn$    = document.getElementById('debug-btn');
 const menuMusic$   = document.getElementById('menu-music');
 const themeMusic$  = document.getElementById('theme-music');
 const themeMusic2$ = document.getElementById('theme-music-2');
@@ -115,7 +121,15 @@ game.onChiselHit    = playChiselSound;
 game.onFillHit      = playFillSound;
 // Flip fires only on a successful mirror — blocked attempts stay silent.
 game.onFlip         = playFlipSound;
+// onCombo and onChain are deliberately separate hooks — Tetris
+// combos (consecutive line clears across pieces) and Puyo chains
+// (consecutive matches within one piece's settle) read as the same
+// "you got a streak!" feedback to the player but represent
+// different game concepts. Each match policy fires only its own
+// event, so both wirings sit here permanently and stay dormant in
+// the mode they don't apply to.
 game.onCombo        = (n)   => hud.notify(`COMBO × ${n}`, 'combo');
+game.onChain        = (n)   => hud.notify(`${n}-CHAIN!`, 'combo');
 game.onTetris       = (b2b) => hud.notify(b2b ? 'BACK-TO-BACK TETRIS' : 'TETRIS', b2b ? 'b2b' : 'tetris', 1900);
 game.onPerfectClear = ()    => hud.notify('PERFECT CLEAR', 'perfect', 2100);
 // Power-up choice menu surfacing. Two callbacks feed showNext:
@@ -226,6 +240,7 @@ setupInput(game, {
     // restarted with R while the menu was open).
     debug.hideMenu();
     debug.hideLauncher();
+    hideMainMenuBtn();
     // Reset the leaderboard surfaces too — leftover submit/browse
     // overlays from the previous run shouldn't persist into the
     // new one. Resets the "already submitted" guard so the next
@@ -235,45 +250,126 @@ setupInput(game, {
   onPause: () => {
     hud.showOverlay('PAUSED', 'PRESS P OR ESC TO RESUME');
     music.pause();
-    // Pause is the only state where the Debug button is reachable —
-    // surfacing it elsewhere would let the player dump unlimited
-    // charges into a live game.
+    // Pause is the only state where the launcher buttons are
+    // reachable — surfacing Debug elsewhere would let the player
+    // dump unlimited charges into a live game, and Main Menu only
+    // makes sense when there's a run to leave behind.
     debug.showLauncher();
+    showMainMenuBtn();
   },
   onResume: () => {
     hud.hideOverlay();
     music.resume();
     debug.hideLauncher();
     debug.hideMenu();
+    hideMainMenuBtn();
   },
 });
 
-// -------- Splash screen Play button --------
-// Same start path as the first keypress in input.js. Wrapped in a
-// guard so a stray double-click after the game has already begun
-// is a harmless no-op. The hover chime gives the button some life,
-// and the start chime fires alongside the theme music swelling in.
-playBtn$.addEventListener('mouseenter', () => {
-  // Only ping while the splash is actually on screen — once the
-  // game has started, the button is hidden and any lingering hover
-  // events shouldn't trigger sound.
-  if (game.started) return;
+// -------- Main-menu launcher (pause overlay) --------
+// Pause-only button that abandons the current run and surfaces the
+// splash screen. We don't confirm — pause is already a deliberate
+// keypress, the player who hit it knows what they're doing, and
+// re-entering a fresh run from the splash is one click away.
+//
+// Click flow mirrors the inverse of `onStart`:
+//   - Stop the per-run audio loop and route music back to the menu
+//   - Reset engine state (sets started=false / paused=false /
+//     gameOver=false; clears the board so a glance at the splash
+//     doesn't show the previous run's wreckage through any future
+//     translucent UI)
+//   - Hide every in-game UI surface that pause exposed
+//   - Re-show the splash screen and re-seed splash keyboard focus
+//     so the next arrow press lands on PLAY TETRIS rather than
+//     wandering off into nothing
+function showMainMenuBtn() { mainMenuBtn$.classList.remove('hidden'); }
+function hideMainMenuBtn() { mainMenuBtn$.classList.add('hidden'); }
+
+mainMenuBtn$.addEventListener('mouseenter', () => {
+  if (mainMenuBtn$.classList.contains('hidden')) return;
   playMenuHoverSound();
 });
-playBtn$.addEventListener('click', () => {
+mainMenuBtn$.addEventListener('click', () => {
+  if (mainMenuBtn$.classList.contains('hidden')) return;
+  playSelectSound();
+  // Tear down the run BEFORE showing the splash so the brief
+  // single-frame gap between hide-overlay and show-splash doesn't
+  // flash a stale board behind the menu screen.
+  hud.hideOverlay();
+  powerupMenu.clear();
+  debug.hideMenu();
+  debug.hideLauncher();
+  hideMainMenuBtn();
+  leaderboard.hide();
+  game.reset();
+  // Re-show the splash and route audio back. music.playMenu()
+  // crossfades out the in-game theme that pause() faded down, so
+  // the transition matches the original boot fade-in.
+  menuScreen$.classList.remove('hidden');
+  music.playMenu();
+  focusSplashButton(0, { silent: true });
+});
+
+// Arrow-key navigation across the pause-overlay launcher buttons.
+// Lives here (rather than in debug.js) because the button list now
+// spans more than just Debug — main.js is the single owner of this
+// surface's nav. The list is recomputed lazily on every keypress so
+// it always reflects current visibility (e.g. just MAIN MENU + DEBUG
+// while the launcher is up; an empty list while either is hidden,
+// which the helper treats as a no-op).
+//
+// Skipped entirely while the debug menu modal is open — that modal
+// owns its own nav, and double-binding would race two listeners on
+// the same arrow-key event.
+wireArrowNav({
+  getButtons: () => {
+    if (mainMenuBtn$.classList.contains('hidden')) return [];
+    if (!debugBtn$.classList.contains('hidden')) {
+      return [mainMenuBtn$, debugBtn$];
+    }
+    return [mainMenuBtn$];
+  },
+  isOpen: () => {
+    if (mainMenuBtn$.classList.contains('hidden')) return false;
+    // Defer to the debug menu's own nav while it's open.
+    const dbg$ = document.getElementById('debug-menu');
+    if (dbg$ && !dbg$.classList.contains('hidden')) return false;
+    return true;
+  },
+  onMove: playCycleSound,
+});
+
+// -------- Splash screen mode-picker buttons --------
+// Two primary actions on the splash now — PLAY TETRIS and PLAY PUYO
+// — wired through one shared starter so the chime / overlay /
+// music / menu-hide ceremony lives in exactly one place. Each
+// button just supplies its mode bundle. The hover chime gives the
+// buttons some life, and the start chime fires alongside the theme
+// music swelling in (via music.playGame's crossfade).
+function startRunInMode(mode) {
   if (game.started) return;
   // Fire the start chime BEFORE game.start() so AudioContext unlock
-  // latency doesn't push it noticeably behind the theme. The
-  // music.playGame() call crossfades the splash menu track out
-  // and the in-game theme in over ~700 ms, so the chime fires on
-  // top of the hand-off rather than after a hard cut.
+  // latency doesn't push it noticeably behind the theme.
   playMenuStartSound();
-  game.start();
+  game.start(mode);
   hud.hideOverlay();
   powerupMenu.clear();
   hideMenuScreen();
   music.playGame();
-});
+}
+function pingHover() {
+  // Only ping while the splash is actually on screen — once the
+  // game has started, the buttons are hidden and any lingering
+  // hover events shouldn't trigger sound.
+  if (game.started) return;
+  playMenuHoverSound();
+}
+
+playBtn$.addEventListener('mouseenter', pingHover);
+playBtn$.addEventListener('click', () => startRunInMode(TETRIS_MODE));
+
+playPuyoBtn$.addEventListener('mouseenter', pingHover);
+playPuyoBtn$.addEventListener('click', () => startRunInMode(PUYO_MODE));
 
 // Splash-menu LEADERBOARD button. The button itself is hidden by
 // default in index.html and un-hidden by leaderboard.js only when
@@ -309,7 +405,7 @@ if (leaderboardBtn$) {
 // .hidden class is toggled by leaderboard.js at boot — and could
 // in principle change later if the config gets re-evaluated.
 function splashButtons() {
-  const list = [playBtn$];
+  const list = [playBtn$, playPuyoBtn$];
   if (leaderboardBtn$ && !leaderboardBtn$.classList.contains('hidden')) {
     list.push(leaderboardBtn$);
   }
@@ -337,6 +433,10 @@ function focusSplashButton(idx, { silent = false } = {}) {
 playBtn$.addEventListener('mouseenter', () => {
   if (game.started) return;
   splashSelected = 0;
+});
+playPuyoBtn$.addEventListener('mouseenter', () => {
+  if (game.started) return;
+  splashSelected = splashButtons().indexOf(playPuyoBtn$);
 });
 if (leaderboardBtn$) {
   leaderboardBtn$.addEventListener('mouseenter', () => {
@@ -429,10 +529,12 @@ function boardClickToCell(e) {
   const scaleY = board$.height / rect.height;
   const px = (e.clientX - rect.left) * scaleX;
   const py = (e.clientY - rect.top)  * scaleY;
-  // Read live width — Growth can grow the board mid-run.
-  const cols = game.board[0]?.length ?? COLS;
+  // Read live dimensions from the board — Growth can grow it mid-run,
+  // and a future mode swap can change the row count entirely.
+  const cols = game.board[0]?.length ?? game.layout.cols;
+  const rows = game.board.length;
   const col = Math.floor(px / (board$.width  / cols));
-  const row = Math.floor(py / (board$.height / ROWS));
+  const row = Math.floor(py / (board$.height / rows));
   return { col, row };
 }
 board$.addEventListener('click', (e) => {
@@ -468,12 +570,18 @@ function frame(now) {
 
   game.tick(dt);
 
-  // Keep the canvas pixel buffer in sync with the (possibly grown)
-  // board width. Setting .width clears the canvas, so guard against
-  // doing it every frame — only when the column count changes.
-  const cols = game.board[0]?.length ?? COLS;
-  const desiredWidth = cols * BLOCK;
-  if (board$.width !== desiredWidth) board$.width = desiredWidth;
+  // Keep the canvas pixel buffer in sync with the live board shape.
+  // Setting .width / .height clears the canvas, so guard against
+  // doing it every frame — only when the dimensions actually change.
+  // Width can shift mid-run (Growth curse adds columns); height only
+  // changes on a mode switch (Puyo's 12-row board is shorter than
+  // Tetris's 20-row).
+  const cols = game.board[0]?.length ?? game.layout.cols;
+  const rows = game.board.length;
+  const desiredWidth  = cols * BLOCK;
+  const desiredHeight = rows * BLOCK;
+  if (board$.width  !== desiredWidth)  board$.width  = desiredWidth;
+  if (board$.height !== desiredHeight) board$.height = desiredHeight;
 
   drawBoard(ctx, board$, game);
 

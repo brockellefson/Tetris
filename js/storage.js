@@ -57,6 +57,24 @@ function headers(extra = {}) {
   };
 }
 
+// Map of mode id → PostgREST table name. Each mode gets its own
+// table so the "top score" semantics stay clean — Tetris's
+// scoreboard doesn't get scrambled with Puyo's chain-power-
+// multiplied numbers, and either table can be wiped or migrated
+// independently. New modes ship with one entry here plus a SQL
+// script (see sql/) that creates the parallel table.
+//
+// Falls through to the Tetris table when called without a mode
+// (legacy callers, defensive default).
+const MODE_TABLES = {
+  tetris: 'scores',
+  puyo:   'scores_puyo',
+};
+
+function tableFor(mode) {
+  return MODE_TABLES[mode] ?? MODE_TABLES.tetris;
+}
+
 // ----------------------------------------------------------------
 // Public API
 // ----------------------------------------------------------------
@@ -68,8 +86,13 @@ export function isEnabled() {
   return LEADERBOARD_ENABLED;
 }
 
-// Fetch the top N scores, ordered by score descending. Defaults to
-// 25 — comfortably fits the browser overlay without scrolling.
+// Fetch the top N scores for a given mode, ordered by score
+// descending. Defaults to 25 rows of the Tetris table.
+//
+// `mode` selects the table — see MODE_TABLES above. Each mode
+// keeps its own leaderboard so cross-mode scores aren't mixed
+// (Puyo's chain-power-multiplied numbers would dwarf Tetris's
+// otherwise).
 //
 // Returns:
 //   { ok: true,  scores: [...] }
@@ -77,12 +100,12 @@ export function isEnabled() {
 //
 // The PostgREST query string mirrors the SQL it generates:
 //   ?select=*&order=score.desc&limit=25
-export async function fetchTopScores(limit = 25) {
+export async function fetchTopScores(limit = 25, mode = 'tetris') {
   if (!LEADERBOARD_ENABLED) {
     return { ok: false, error: 'Leaderboard not configured' };
   }
   try {
-    const url = `${SUPABASE_URL}/rest/v1/scores`
+    const url = `${SUPABASE_URL}/rest/v1/${tableFor(mode)}`
       + `?select=*`
       + `&order=score.desc`
       + `&limit=${encodeURIComponent(limit)}`;
@@ -101,10 +124,10 @@ export async function fetchTopScores(limit = 25) {
   }
 }
 
-// Submit a single score. The caller (leaderboard.js) is responsible
-// for assembling the entry from game state — storage.js doesn't
-// know anything about Game, blessings, or curses; it just shapes
-// the row Supabase wants and posts it.
+// Submit a single score for a given mode. The caller (leaderboard.js)
+// is responsible for assembling the entry from game state — storage.js
+// doesn't know anything about Game, blessings, or curses; it just
+// shapes the row Supabase wants and posts it to the right table.
 //
 // `entry` shape:
 //   {
@@ -117,6 +140,9 @@ export async function fetchTopScores(limit = 25) {
 //     curses:      array  (defaults to [])
 //     specials:    object (defaults to {})
 //   }
+// `mode` selects the table — see MODE_TABLES above. Defaults to
+// Tetris so legacy callers that omit it stay on the historic
+// behavior.
 //
 // Returns:
 //   { ok: true,  row: <inserted row> }
@@ -125,7 +151,7 @@ export async function fetchTopScores(limit = 25) {
 // Prefer header `Prefer: return=representation` so PostgREST hands
 // the inserted row (with its `id` and `created_at`) back — the UI
 // can then highlight the just-submitted row in the browser view.
-export async function submitScore(entry) {
+export async function submitScore(entry, mode = 'tetris') {
   if (!LEADERBOARD_ENABLED) {
     return { ok: false, error: 'Leaderboard not configured' };
   }
@@ -147,7 +173,7 @@ export async function submitScore(entry) {
     specials:    (entry.specials && typeof entry.specials === 'object') ? entry.specials : {},
   };
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/scores`, {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${tableFor(mode)}`, {
       method: 'POST',
       headers: headers({ 'Prefer': 'return=representation' }),
       body: JSON.stringify(row),

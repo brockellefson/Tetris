@@ -156,6 +156,10 @@ export default {
   id: 'fill',
   name: 'Fill',
   description: 'Press S to fill any empty cell. 5-line cooldown.',
+  // Tetris-only — Fill detects post-cast row clears via findFullRows
+  // and routes through Tetris's clear pipeline. Puyo's analog would
+  // be "drop a colored puyo," which is a different plugin entirely.
+  modes: ['tetris'],
   available: (game) => !game.unlocks.fill,
   apply: (game) => {
     game.unlocks.fill = true;

@@ -120,10 +120,78 @@ function mirrorShape(type, rot) {
 // the horizontally-mirrored shape instead. Every consumer (collides,
 // lockPiece, renderer) goes through this function, so flipping is
 // transparent to the rest of the engine.
+//
+// Pieces with `kind: 'pair'` (Puyo Puyo) provide their own pre-built
+// rotation table on the piece itself (see js/modes/puyo/pieces.js).
+// We branch on `kind` here so the rest of the engine — collides,
+// lockPiece, ghostPosition, render — stays a single code path.
 export function shapeOf(piece) {
+  if (piece.kind === 'pair') return PAIR_SHAPES[piece.rot];
   if (piece.flipped) return mirrorShape(piece.type, piece.rot);
   return PIECES[piece.type][piece.rot];
 }
+
+// Returns the kind/color string a specific filled cell of a piece
+// should write to the board (and that the renderer should paint).
+//
+// Tetris pieces have a uniform color across all minos — every cell
+// of a T-piece is 'T'. Puyo pairs have TWO independently colored
+// cells (the pivot and the satellite), so we dispatch by piece kind
+// and rotation to figure out which is which. Callers iterate the
+// shape matrix and only ask about cells that are filled, so we never
+// need to handle the empty-cell case.
+//
+// Defined here (rather than on the piece policy) because the
+// callers — lockPiece in board.js, render.js's piece-painting loops
+// — operate on a piece directly, without a Game reference. Routing
+// every call through `game.mode.pieces.cellKindAt` would force every
+// caller to thread Game in, with no upside.
+export function cellKindAt(piece, r, c) {
+  if (piece.kind === 'pair') {
+    // Pivot is always at (1,1) of the 3×3 pair grid; the OTHER
+    // filled cell — wherever the satellite is for this rotation —
+    // is the satellite. Callers only invoke us on filled cells, so
+    // this binary check is sufficient.
+    if (r === 1 && c === 1) return piece.pivot;
+    return piece.satellite;
+  }
+  return piece.type;
+}
+
+// True iff cell (r, c) of `piece`'s shape grid is the piece's pivot.
+// For Puyo pairs, the pivot is the cell rotation orbits around — the
+// renderer marks it with a small center dot so the player can see
+// which way the satellite will spin. Tetris pieces have no pivot
+// concept (every mino is equal), so this always returns false for
+// them. Symmetric with cellKindAt: any caller iterating filled cells
+// of a piece can ask about each cell uniformly.
+export function isPivotCell(piece, r, c) {
+  if (piece.kind === 'pair') return r === 1 && c === 1;
+  return false;
+}
+
+// Pair shapes — 3×3 grids with the pivot at (1,1) and the satellite
+// rotating 90° clockwise per rot step (top → right → bottom → left).
+// Stored at module scope (not exported) because shapeOf is the only
+// reader; the puyo piece-policy uses them indirectly via shapeOf.
+const PAIR_SHAPES = [
+  // rot 0 — satellite above pivot
+  [[0, 1, 0],
+   [0, 1, 0],
+   [0, 0, 0]],
+  // rot 1 — satellite right of pivot
+  [[0, 0, 0],
+   [0, 1, 1],
+   [0, 0, 0]],
+  // rot 2 — satellite below pivot
+  [[0, 0, 0],
+   [0, 1, 0],
+   [0, 1, 0]],
+  // rot 3 — satellite left of pivot
+  [[0, 0, 0],
+   [1, 1, 0],
+   [0, 0, 0]],
+];
 
 // Map a (row, col) coordinate from a piece's rot-0 frame to its
 // current rotation + flip. Used by the special-blocks subsystem so a

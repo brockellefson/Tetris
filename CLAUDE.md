@@ -74,6 +74,8 @@ Tetris/
 
 Each non-trivial power-up or curse exports a single object with a card definition (`id`, `name`, `description`, `available`, `apply`) plus any subset of the lifecycle-hook methods below. `main.js` calls `game.registerPlugin(plugin)` at boot. After registration, Game dispatches into the plugin at fixed call sites and otherwise stays ignorant of its existence.
 
+**Mode gating** — an optional `modes: ['tetris', ...]` field on the plugin object whitelists which game modes it applies to. When the field is absent the plugin is universal (the gravity-cascade engine is the canonical example — it works for any mode that has a match policy). When the field is set, every lifecycle hook below is skipped unless `game.mode.id` is in the list. Filtering happens at dispatch time, so `main.js` registers every plugin once at boot and `game.start(mode)` flips the active set without re-registration. `init(game)` is exempt — it runs once at registration, before the run's mode is settled, and is meant for module-level setup that doesn't depend on game state.
+
 **Hook contract** — every hook receives `game` as the first arg.
 
 | Hook                              | Fired when                                                                                                                                      |

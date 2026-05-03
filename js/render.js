@@ -18,8 +18,8 @@
 //     offscreen canvas keyed by column count.
 // ============================================================
 
-import { COLS, ROWS, BLOCK, COLORS } from './constants.js';
-import { PIECES, shapeOf } from './pieces.js';
+import { BLOCK, COLORS } from './constants.js';
+import { PIECES, shapeOf, cellKindAt, isPivotCell } from './pieces.js';
 import { SPECIALS_BY_ID, specialAtPieceCell } from './specials/index.js';
 
 // ---- Rarity → visual treatment ----
@@ -284,6 +284,26 @@ export function drawCell(ctx, x, y, color, ghost = false) {
   drawBlock(ctx, x * BLOCK, y * BLOCK, BLOCK, color, ghost);
 }
 
+// Tiny center dot painted on top of a cell — used by Puyo to mark
+// the pivot of the active pair so the player can see which way
+// rotation orbits. Sized as a fraction of BLOCK so the dot scales
+// with any future per-cell size change. Drawn with a soft glow so
+// it reads on every puyo color (red, green, blue, yellow) without
+// fighting the block's own gradient.
+function drawPivotDot(ctx, x, y) {
+  const cx = x * BLOCK + BLOCK / 2;
+  const cy = y * BLOCK + BLOCK / 2;
+  const radius = BLOCK * 0.14;
+  ctx.save();
+  ctx.shadowColor = 'rgba(255, 255, 255, 0.9)';
+  ctx.shadowBlur  = 6;
+  ctx.fillStyle   = 'rgba(255, 255, 255, 0.95)';
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
 // ============================================================
 // Special blocks
 // ============================================================
@@ -377,14 +397,17 @@ function drawSpecialCell(ctx, x, y, def, timeMs) {
 // Paint the main playfield: background, grid lines, locked blocks,
 // ghost outline, and active piece.
 export function drawBoard(ctx, canvas, game) {
-  // Read width from the board so the renderer follows runtime growth
-  // (the Growth curse adds columns).
-  const cols = game.board[0]?.length ?? COLS;
+  // Read dimensions from the board itself so the renderer follows
+  // runtime growth (the Growth curse adds columns) AND any future
+  // mode-driven layout change. cols mirrors what main.js used to
+  // size the canvas pixel buffer; rows is just board.length.
+  const cols = game.board[0]?.length ?? game.layout.cols;
+  const rows = game.board.length;
 
   // Background + grid: one drawImage instead of a fillRect plus
-  // (cols-1)+(ROWS-1) stroke calls every frame. The sprite is
+  // (cols-1)+(rows-1) stroke calls every frame. The sprite is
   // rebuilt only when the column count changes.
-  ctx.drawImage(getBgSprite(cols, ROWS), 0, 0);
+  ctx.drawImage(getBgSprite(cols, rows), 0, 0);
 
   // Single time source for every animated overlay this frame so all
   // specials cycle in phase with each other (and with future
@@ -397,7 +420,7 @@ export function drawBoard(ctx, canvas, game) {
   // else. The grid lives in the plugin-state bag, owned by the
   // specials plugin's reset hook.
   const specials = game._pluginState.specials?.boardGrid;
-  for (let r = 0; r < ROWS; r++) {
+  for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       if (!game.board[r][c]) continue;
       const tag = specials?.[r]?.[c];
@@ -412,11 +435,22 @@ export function drawBoard(ctx, canvas, game) {
     }
   }
 
-  // Line-clear animation overlay (drawn on top of the locked blocks)
+  // Line-clear animation overlay (drawn on top of the locked blocks).
+  // Two shapes today, dispatched off the canonical clearingResult:
+  //   • Tetris — full rows. Clearing cells form a horizontal band, so
+  //     we paint a flash + horizontal wipe per row.
+  //   • Puyo — flood-fill cells. We paint a per-cell flash + shrink so
+  //     each connected group dissolves in place rather than wiping
+  //     sideways into empty space.
   if (game.isClearing && game.isClearing()) {
     const p = game.clearProgress();
-    for (const row of game.clearingRows) {
-      drawClearOverlay(ctx, row, p, cols);
+    const cells = game.clearingResult?.cells;
+    if (cells && cells.length) {
+      for (const { x, y } of cells) drawCellClearOverlay(ctx, x, y, p);
+    } else {
+      for (const row of game.clearingRows) {
+        drawClearOverlay(ctx, row, p, cols);
+      }
     }
   }
 
@@ -452,14 +486,18 @@ export function drawBoard(ctx, canvas, game) {
   const s = shapeOf(game.current);
   const gy = game.ghostY();
 
-  // ghost piece — only if the player has unlocked the Predictor power-up
-  if (game.unlocks?.ghost) {
+  // Ghost piece — drop-position preview. Tetris gates this behind
+  // the Predictor blessing (a roguelite unlock); modes that want it
+  // always-on (Puyo) set mode.hud.alwaysShowGhost so the renderer
+  // stays mode-agnostic and the decision lives on the bundle.
+  const showGhost = game.unlocks?.ghost || game.mode?.hud?.alwaysShowGhost;
+  if (showGhost) {
     for (let r = 0; r < s.length; r++) {
       for (let c = 0; c < s[r].length; c++) {
         if (!s[r][c]) continue;
         const x = game.current.x + c;
         const y = gy + r;
-        if (y >= 0) drawCell(ctx, x, y, COLORS[game.current.type], true);
+        if (y >= 0) drawCell(ctx, x, y, COLORS[cellKindAt(game.current, r, c)], true);
       }
     }
   }
@@ -483,7 +521,11 @@ export function drawBoard(ctx, canvas, game) {
           continue;
         }
       }
-      drawCell(ctx, x, y, COLORS[game.current.type]);
+      drawCell(ctx, x, y, COLORS[cellKindAt(game.current, r, c)]);
+      // Pivot indicator for Puyo pairs — a small center dot marks
+      // the cell rotation orbits around. isPivotCell returns false
+      // for every Tetris piece, so this is a no-op outside Puyo.
+      if (isPivotCell(game.current, r, c)) drawPivotDot(ctx, x, y);
     }
   }
 
@@ -513,7 +555,7 @@ export function drawBoard(ctx, canvas, game) {
 // Two phases:
 //   0.0 → 0.55  flash the whole row bright white (intensity pulses)
 //   0.55 → 1.0  wipe outward from the center, revealing background
-function drawClearOverlay(ctx, row, progress, cols = COLS) {
+function drawClearOverlay(ctx, row, progress, cols) {
   const py = row * BLOCK;
 
   if (progress < 0.55) {
@@ -539,6 +581,39 @@ function drawClearOverlay(ctx, row, progress, cols = COLS) {
         ctx.fillStyle = `rgba(255, 255, 255, ${tint})`;
         ctx.fillRect(c * BLOCK, py, BLOCK, BLOCK);
       }
+    }
+  }
+}
+
+// Per-cell version of the clear overlay, used by Puyo for the
+// flood-fill clear animation. A full-row wipe would look weird on
+// scattered groups, so we shrink each clearing cell in place
+// instead — flash bright in the first half, then collapse to a
+// background-colored point in the second half. The renderer
+// dispatches between the two overlays based on whether
+// clearingResult exposes `cells` (Puyo) or `rows` (Tetris).
+function drawCellClearOverlay(ctx, col, row, progress) {
+  const px = col * BLOCK;
+  const py = row * BLOCK;
+
+  if (progress < 0.55) {
+    // Flash phase — pulse a white overlay over the cell.
+    const t = progress / 0.55;
+    const alpha = 0.45 + 0.35 * Math.sin(t * Math.PI * 3);
+    ctx.fillStyle = `rgba(255, 255, 255, ${Math.max(0, alpha)})`;
+    ctx.fillRect(px, py, BLOCK, BLOCK);
+  } else {
+    // Shrink phase — paint the cell with background, leaving a
+    // shrinking white square in the middle.
+    const t = (progress - 0.55) / 0.45;
+    ctx.fillStyle = COLORS.BG;
+    ctx.fillRect(px, py, BLOCK, BLOCK);
+    const inset = (BLOCK / 2) * t;
+    const size  = BLOCK - inset * 2;
+    if (size > 0) {
+      const tint = 0.8 * (1 - t);
+      ctx.fillStyle = `rgba(255, 255, 255, ${tint})`;
+      ctx.fillRect(px + inset, py + inset, size, size);
     }
   }
 }
@@ -715,18 +790,31 @@ function drawFillCursor(ctx, cursor, onEmpty) {
 
 // Render a single piece centered inside a small canvas (hold / next preview).
 //
+// The `type` argument is whatever shape the active mode's queue
+// holds: a Tetris piece-letter string ('T', 'I', …) or a Puyo pair
+// record ({ pivot, satellite }). We synthesize a rot-0 placeholder
+// piece from it and route through shapeOf + cellKindAt so the
+// preview paints the same way the active piece does on the board —
+// pair previews show the pivot below and the satellite above, in
+// each color.
+//
 // `specials` is optional — a list of `{ rot0Row, rot0Col, kind }` in
-// the rot-0 frame, matching the shape PIECES[type][0] this preview
-// always renders. When supplied, tagged minos paint with the cycling
-// special palette instead of the piece's flat color, so a held
-// special-bearing piece reads in the preview the same way it reads
-// on the board.
+// the rot-0 frame. Tetris-only feature; Puyo never sets it. When
+// supplied, tagged minos paint with the cycling special palette
+// instead of the piece's flat color, so a held special-bearing piece
+// reads in the preview the same way it reads on the board.
 export function drawMini(canvas, ctx, type, specials = null) {
   ctx.fillStyle = COLORS.BG;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   if (!type) return;
 
-  const shape = PIECES[type][0];
+  // Synthesize the placeholder piece. Tetris queue holds letter
+  // strings; Puyo queue holds {pivot, satellite} pair records.
+  // shapeOf + cellKindAt then handle the rest uniformly.
+  const piece = (typeof type === 'string')
+    ? { type, rot: 0, x: 0, y: 0, flipped: false }
+    : { kind: 'pair', pivot: type.pivot, satellite: type.satellite, rot: 0, x: 0, y: 0 };
+  const shape = shapeOf(piece);
 
   // find the bounding box of filled cells so we can center the piece
   let minR = 99, maxR = -1, minC = 99, maxC = -1;
@@ -766,7 +854,7 @@ export function drawMini(canvas, ctx, type, specials = null) {
           continue;
         }
       }
-      drawBlock(ctx, x, y, cell, COLORS[type]);
+      drawBlock(ctx, x, y, cell, COLORS[cellKindAt(piece, r, cc)]);
     }
   }
 }

@@ -17,10 +17,13 @@ import { collides } from '../board.js';
 // spawn-on-collision rule).
 function addRow(game) {
   game.board.shift();
-  const COLS = game.board[0]?.length ?? 10;
-  const gap = Math.floor(Math.random() * COLS);
+  // Live width — Growth can have widened the board past the layout's
+  // natural cols, and a junk row needs to span every column to be
+  // legible as a "row" rather than a partial smear.
+  const cols = game.board[0]?.length ?? game.layout.cols;
+  const gap = Math.floor(Math.random() * cols);
   const row = [];
-  for (let c = 0; c < COLS; c++) {
+  for (let c = 0; c < cols; c++) {
     row.push(c === gap ? null : 'JUNK');
   }
   game.board.push(row);

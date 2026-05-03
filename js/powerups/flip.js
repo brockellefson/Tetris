@@ -72,6 +72,10 @@ export default {
   id: 'flip',
   name: 'Flip',
   description: 'Press F to mirror the active piece. 5-line cooldown.',
+  // Tetris-only — Flip mirrors a tetromino around its bounding-box
+  // axis. Puyo pairs are 1×2 with a pivot; "flip" would just swap
+  // which color is on top, which is a different mechanic.
+  modes: ['tetris'],
   available: (game) => !game.unlocks.flip,
   apply: (game) => {
     game.unlocks.flip = true;

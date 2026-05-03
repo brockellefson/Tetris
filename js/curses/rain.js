@@ -17,21 +17,21 @@ import { collides } from '../board.js';
 // same column can stack up under multiple raindrops. Avoids landing
 // inside the active piece to prevent unfair instant overlaps.
 function dropBlocks(game) {
-  const ROWS = game.board.length;
-  const COLS = game.board[0]?.length ?? 10;
+  const rows = game.board.length;
+  const cols = game.board[0]?.length ?? game.layout.cols;
   const want = 5 + Math.floor(Math.random() * 6); // 5-10
   let placed = 0;
   for (let i = 0; i < want; i++) {
     const candidates = [];
-    for (let c = 0; c < COLS; c++) {
+    for (let c = 0; c < cols; c++) {
       if (!game.board[0][c]) candidates.push(c);
     }
     if (candidates.length === 0) break;
     const c = candidates[Math.floor(Math.random() * candidates.length)];
     // Find the topmost filled cell in this column; the junk lands
     // one row above it. Empty column → land on the floor.
-    let landingRow = ROWS - 1;
-    for (let r = 0; r < ROWS; r++) {
+    let landingRow = rows - 1;
+    for (let r = 0; r < rows; r++) {
       if (game.board[r][c]) { landingRow = r - 1; break; }
     }
     if (landingRow < 0) continue;                       // packed full

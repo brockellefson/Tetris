@@ -12,15 +12,13 @@
 // ============================================================
 
 import {
-  GRAVITY, DAS, ARR, SOFT, lineClearScore, CLEAR_DURATION,
+  DAS, ARR, SOFT, CLEAR_DURATION,
   CHISEL_DURATION, FILL_DURATION,
   SHAKE_DURATION, SHAKE_LOCK, SHAKE_HARDDROP,
-  B2B_MULTIPLIER, COMBO_BONUS, PERFECT_CLEAR_BONUS,
-  MENU_SETTLE_MS,
 } from './constants.js';
-import { newBoard, collides, lockPiece, findFullRows, removeRows } from './board.js';
-import { spawn, tryMove, tryRotate, ghostPosition } from './piece.js';
-import { bagShuffle, shapeOf } from './pieces.js';
+import { newBoard, collides, lockPiece } from './board.js';
+import { TETRIS_MODE } from './modes/index.js';
+import { shapeOf } from './pieces.js';
 
 export class Game {
   constructor() {
@@ -30,6 +28,11 @@ export class Game {
     // those plugins' init() runs immediately, and their reset() hook
     // fires from the next game.start().
     this._plugins = [];
+    // Default mode — Tetris. start(mode) overrides this before calling
+    // reset() if main.js wants a different game mode (Puyo, sprint,
+    // etc.). Setting it here means the constructor's reset() always
+    // sees a populated mode without needing a "first reset" branch.
+    this.mode = TETRIS_MODE;
     this.reset();
   }
 
@@ -40,6 +43,19 @@ export class Game {
   // a plain object with any subset of the hook fields below. Game
   // calls into them at fixed dispatch points and otherwise stays
   // ignorant of their existence.
+  //
+  // Mode gating — `modes: ['tetris', ...]`
+  //   Optional whitelist of game-mode IDs the plugin applies to.
+  //   When undefined, the plugin is universal (gravity-cascade,
+  //   future engine-level helpers). When set, every lifecycle hook
+  //   below is skipped unless `game.mode.id` is in the list.
+  //   Filtering happens at dispatch time, so a single Game instance
+  //   can switch modes across runs without re-registering plugins —
+  //   start(mode) flips the active set, and the next dispatch sees
+  //   the new mode's plugins automatically.
+  //   `init(game)` is exempt — it runs once at registerPlugin and
+  //   is meant for module-level setup that doesn't depend on game
+  //   state. Everything else (reset, tick, hooks below) is gated.
   //
   // Hook contract — every hook receives `game` as the first arg.
   //   init(game)             once on registerPlugin()
@@ -101,16 +117,49 @@ export class Game {
     plugin.init?.(this);
   }
 
+  // Per-mode dispatch gate. A plugin opts into specific modes by
+  // declaring `modes: ['tetris', ...]`; if the field is undefined
+  // the plugin is universal (gravity-cascade, future engine-level
+  // helpers). Universal plugins always run; mode-tagged plugins only
+  // run when this.mode.id is in their list.
+  //
+  // Gating happens at dispatch time (here) rather than at
+  // registration time so a single Game instance can switch between
+  // modes across runs — main.js registers every plugin once at boot
+  // and start(mode) flips the active set without re-registration.
+  // The cost is one Array.includes per plugin per dispatch, which is
+  // a non-issue at the volume of hooks we fire.
+  //
+  // init() is exempt — it runs once at registerPlugin, before any
+  // mode is meaningful for the plugin's lifetime, and is meant for
+  // module-level setup that doesn't depend on game state. Every
+  // other lifecycle hook (reset, tick, onSpawn, onLock, beforeClear,
+  // onClear, onCellRemoved, onPlayerAdjustment, beforeHoldSwap /
+  // afterHoldSwap, shouldDeferLock, freezesGameplay, interceptInput,
+  // decoratePiece, modifyGravityIndex, allowsBagPiece) flows through
+  // a helper below and gets gated.
+  _appliesToCurrentMode(plugin) {
+    if (!plugin.modes) return true;
+    return plugin.modes.includes(this.mode.id);
+  }
+
   _notifyPlugins(event, ...args) {
-    for (const p of this._plugins) p[event]?.(this, ...args);
+    for (const p of this._plugins) {
+      if (!this._appliesToCurrentMode(p)) continue;
+      p[event]?.(this, ...args);
+    }
   }
 
   _tickPlugins(dt) {
-    for (const p of this._plugins) p.tick?.(this, dt);
+    for (const p of this._plugins) {
+      if (!this._appliesToCurrentMode(p)) continue;
+      p.tick?.(this, dt);
+    }
   }
 
   _isFrozenByPlugin() {
     for (const p of this._plugins) {
+      if (!this._appliesToCurrentMode(p)) continue;
       if (p.freezesGameplay?.(this)) return true;
     }
     return false;
@@ -118,6 +167,7 @@ export class Game {
 
   _shouldDeferLock() {
     for (const p of this._plugins) {
+      if (!this._appliesToCurrentMode(p)) continue;
       if (p.shouldDeferLock?.(this)) return true;
     }
     return false;
@@ -143,6 +193,7 @@ export class Game {
   // (e.g. boardClick coords) are forwarded to the plugin.
   _interceptInput(action, ...args) {
     for (const p of this._plugins) {
+      if (!this._appliesToCurrentMode(p)) continue;
       if (p.interceptInput?.(this, action, ...args)) return true;
     }
     return false;
@@ -156,6 +207,7 @@ export class Game {
   // the engine default; later plugins see the prior plugin's output.
   _reduceHookValue(event, value, ...args) {
     for (const p of this._plugins) {
+      if (!this._appliesToCurrentMode(p)) continue;
       if (p[event]) value = p[event](this, value, ...args);
     }
     return value;
@@ -167,6 +219,7 @@ export class Game {
   // bag refill).
   _allowedByAllPlugins(event, ...args) {
     for (const p of this._plugins) {
+      if (!this._appliesToCurrentMode(p)) continue;
       if (p[event] && p[event](this, ...args) === false) return false;
     }
     return true;
@@ -214,7 +267,17 @@ export class Game {
     // tick away during a Gravity cascade or chisel pick. Zero means
     // "no settle pending."
     this._menuSettleTimer = 0;
-    this.board       = newBoard();
+    // Layout — playfield dimensions for the run. Always derived
+    // from the current mode bundle; start(mode) sets this.mode
+    // before calling reset() so a fresh layout lands here on every
+    // mode switch. Plugins, render, and curses read board dimensions
+    // through this (or directly off `board.length` /
+    // `board[0].length` when they want the post-Growth live width).
+    // The Growth curse mutates the board array's width in place —
+    // `layout.cols` stays at the natural width so Growth knows how
+    // far it can shrink.
+    this.layout      = this.mode.layout;
+    this.board       = newBoard(this.layout);
     // (boardSpecials and holdSpecials used to live as named slots on
     // Game. Both are now owned by the specials plugin in its slot at
     // `this._pluginState.specials.{boardGrid, holdSpecials}`, seeded
@@ -234,9 +297,20 @@ export class Game {
     this.started     = false;
     this.softDropping = false;
     this.moveState   = { left: false, right: false, leftHeld: 0, rightHeld: 0, lastShift: 0 };
-    // Line-clear animation state. While clearingRows is non-empty,
+    // Line-clear animation state. While `clearingResult` is non-null
     // the game pauses gravity/input and the renderer plays the effect.
-    this.clearingRows = [];
+    //   clearingResult — the full result object the match policy
+    //                    returned from findClears (Tetris: { rows },
+    //                    Puyo: { cells, groups }). Single source of
+    //                    truth for "is something clearing right now."
+    //   clearingRows  —  back-compat field for Tetris's row-flash
+    //                    animation, the specials plugin's row-shift
+    //                    pipeline, and any external reader that still
+    //                    expects a row-index array. Populated from
+    //                    clearingResult.rows whenever a Tetris-style
+    //                    clear is in progress; stays empty in Puyo.
+    this.clearingResult = null;
+    this.clearingRows   = [];
     this.clearTimer  = 0;
     // Board-shake state — set by triggerShake(), decayed in tick(),
     // read by main.js as a CSS transform on the canvas.
@@ -428,9 +502,12 @@ export class Game {
     };
   }
 
-  // True while a line-clear animation is playing.
+  // True while a line-clear animation is playing. Reads the
+  // canonical clearingResult slot rather than clearingRows so that
+  // Puyo's cell-based clears (which leave clearingRows empty) still
+  // register as "clearing."
   isClearing() {
-    return this.clearingRows.length > 0;
+    return this.clearingResult !== null;
   }
 
   // Animation progress 0..1 — used by the renderer.
@@ -458,7 +535,15 @@ export class Game {
     return Math.min(1, t.timer / FILL_DURATION);
   }
 
-  start() {
+  // Begin a new run. The mode argument selects the bundle of
+  // policies (piece spawn / rotate, clear detection, scoring) and
+  // the layout the engine drives this run with. Defaulting to the
+  // current mode lets main.js call start() without arguments to
+  // restart the same mode after game over; passing a different
+  // mode (TETRIS_MODE / PUYO_MODE / future variants) starts a run
+  // in that shape.
+  start(mode = this.mode) {
+    this.mode = mode;
     this.reset();
     this.started = true;
     // Stamp the run's start time AFTER reset so reset()'s zeroing
@@ -491,10 +576,10 @@ export class Game {
     // hook (Cruel uses it to filter out I-pieces while the curse is
     // active). The bag is re-evaluated every refill, so as soon as
     // the player levels past Cruel's window the I-piece returns.
+    // The mode's piece policy owns the actual filling rule (7-bag
+    // for Tetris; per-pair RNG for Puyo when that lands).
     const allowsType = (type) => this._allowedByAllPlugins('allowsBagPiece', type);
-    while (this.queue.length < 7) {
-      this.queue.push(...bagShuffle(allowsType));
-    }
+    this.mode.pieces.refillQueue(this.queue, allowsType);
   }
 
   spawnNext() {
@@ -504,7 +589,10 @@ export class Game {
     // — Specials uses this to possibly tag one mino. The hook is a
     // modifier (returns the new piece), threaded through every
     // registered plugin in registration order.
-    this.current = this._reduceHookValue('decoratePiece', spawn(type));
+    this.current = this._reduceHookValue(
+      'decoratePiece',
+      this.mode.pieces.spawn(type, this.layout),
+    );
     this.canHold = true;
     // If the new piece spawns into a filled cell, the game is over.
     if (collides(this.board, this.current)) {
@@ -524,7 +612,7 @@ export class Game {
 
   move(dx) {
     if (!this.current) return;
-    const next = tryMove(this.board, this.current, dx, 0);
+    const next = this.mode.pieces.tryMove(this.board, this.current, dx, 0);
     if (next) {
       this.current = next;
       // Notify plugins of a successful adjustment. Slick uses this for
@@ -535,7 +623,7 @@ export class Game {
 
   rotate(dir) {
     if (!this.current) return;
-    const next = tryRotate(this.board, this.current, dir);
+    const next = this.mode.pieces.tryRotate(this.board, this.current, dir);
     if (next) {
       this.current = next;
       this._notifyPlugins('onPlayerAdjustment', 'rotate');
@@ -544,7 +632,7 @@ export class Game {
 
   softDrop() {
     if (!this.current) return;
-    const next = tryMove(this.board, this.current, 0, 1);
+    const next = this.mode.pieces.tryMove(this.board, this.current, 0, 1);
     if (next) {
       this.current = next;
       this.score += 1; // 1 point per soft-dropped cell
@@ -561,7 +649,7 @@ export class Game {
     if (!this.current) return;
     let drops = 0;
     while (true) {
-      const next = tryMove(this.board, this.current, 0, 1);
+      const next = this.mode.pieces.tryMove(this.board, this.current, 0, 1);
       if (!next) break;
       this.current = next;
       drops++;
@@ -585,7 +673,7 @@ export class Game {
     // branch; it's a no-op on the swap branch (no spawnNext fires).
     this._notifyPlugins('beforeHoldSwap');
     if (this.hold) {
-      this.current = spawn(this.hold);
+      this.current = this.mode.pieces.spawn(this.hold, this.layout);
       if (collides(this.board, this.current)) this.gameOver = true;
     } else {
       // First-hold branch: stash the held piece and pull the next
@@ -611,121 +699,27 @@ export class Game {
     this.triggerShake(SHAKE_LOCK); // small bounce on every placement
     this.onLock?.(); // optional sound / FX hook (set by main.js)
 
-    const fullRows = findFullRows(this.board);
-    if (fullRows.length > 0) {
-      // Start the clear animation. The rows stay on the board — the
-      // renderer will paint them with the clearing effect, and tick()
-      // will call completeClear() when CLEAR_DURATION elapses.
-      this.clearingRows = fullRows;
-      this.clearTimer = 0;
-      this.current = null; // hide the piece; spawn deferred until clear completes
-      this.onLineClear?.(fullRows.length); // fires at start of animation
-    } else {
-      // No clear → combo broken. (B2B is preserved across non-clearing
-      // placements; only a non-Tetris clear breaks B2B.)
-      this.combo = 0;
-      this.spawnNext();
-    }
+    // Hand off the post-lock branch to the mode's match policy.
+    // Tetris does immediate clear-detection-or-spawn here (the
+    // historic flow). Puyo defers to the cascade engine: settle
+    // floating cells, run flood-fill, animate clears, loop, then
+    // spawn the next pair. The two paths share zero logic, so
+    // putting them on the policy is the right seam.
+    this.mode.match.afterLock(this);
   }
 
   // Called from tick() once the clear animation finishes.
   completeClear() {
-    const cleared = this.clearingRows.length;
-    // Plugin hook — fires BEFORE removeRows mutates the board, with
-    // the about-to-vanish row indices. Specials uses this to capture
-    // the kind/coords of every special-bearing cell on those rows
-    // (and shift its parallel grid in lock-step) before the data is
-    // gone. Triggers themselves fire from the onClear hook below,
-    // after scoring is finalized.
-    this._notifyPlugins('beforeClear', this.clearingRows);
-    removeRows(this.board, this.clearingRows);
-
-    // Capture the B2B flag before we mutate state — needed for both the
-    // bonus calculation and the visual notification below.
-    const wasB2B = (cleared === 4 && this.lastClearWasTetris);
-
-    // Base line score (current level — level-up happens after).
-    // lineClearScore handles cleared > 4, which a normal lock can't
-    // produce but a cascade-triggering special on a wide board can.
-    let lineScore = lineClearScore(cleared) * this.level;
-    if (wasB2B) lineScore = Math.floor(lineScore * B2B_MULTIPLIER);
-    this.score += lineScore;
-
-    // Combo bonus: combo accumulates the actual line count, then awards
-    // COMBO_BONUS × combo × level. So a Tetris in a streak pays much
-    // more than a single, and chains of multi-line clears compound fast.
-    this.combo += cleared;
-    this.score += COMBO_BONUS * this.combo * this.level;
-
-    // Update B2B state. Only a Tetris keeps the chain alive — a Single,
-    // Double, or Triple breaks it.
-    this.lastClearWasTetris = (cleared === 4);
-
-    // Perfect Clear: flat bonus when the board is fully empty.
-    const perfect = this.board.every(row => row.every(cell => cell === null));
-    if (perfect) this.score += PERFECT_CLEAR_BONUS;
-
-    const linesBefore = this.lines;
-    const oldLevel = this.level;
-    this.lines += cleared;
-    this.level = Math.floor(this.lines / 10) + 1;
-
-    // (Junk curse used to drop another batch on every level-up here;
-    // it's now a one-shot hit at pick time, so nothing to do on
-    // level-up.)
-
-    // Roguelite power-up milestone — every 5 lines earns a choice.
-    // (Max 1 per clear since clears top out at 4 lines.) The very
-    // first line clear of a run also earns a bonus choice on top of
-    // any milestone, so a starting tetris awards 2 power-ups.
-    // Each card in the resulting menu carries its own random curse
-    // (see js/main.js) — there's no separate curse milestone anymore.
-    let milestonesEarned =
-      Math.floor(this.lines / 5) - Math.floor(linesBefore / 5);
-    if (!this.firstClearAwarded && cleared > 0) {
-      this.firstClearAwarded = true;
-      milestonesEarned += 1;
-    }
-    this.pendingChoices += milestonesEarned;
-    // Arm the universal menu-settle pause whenever a clear actually
-    // earns the player a power-up choice. Without this, the modal
-    // pops the same frame the score / line / level numbers update —
-    // the player misses the satisfying tick. The timer is held at
-    // full duration by tick()'s gating until any in-flight modal
-    // (cascade, chisel, etc.) finishes, then drains and finally lets
-    // the menu open via the onPluginIdle transition.
-    if (milestonesEarned > 0) {
-      this._menuSettleTimer = MENU_SETTLE_MS;
-    }
-
-    // Visual / FX hooks — fired in importance order so the notification
-    // stack reads top-to-bottom: PERFECT > TETRIS/B2B > COMBO.
-    if (perfect)         this.onPerfectClear?.();
-    if (cleared === 4)   this.onTetris?.(wasB2B);
-    if (this.combo >= 2) this.onCombo?.(this.combo);
-
-    this.clearingRows = [];
-    this.clearTimer = 0;
-    // Plugin hook — fires after scoring is fully applied. Specials
-    // fires its captured triggers here (e.g. a Gravity special on a
-    // cleared row kicks off a cascade). Fill uses it to know a fill-
-    // triggered clear has wrapped up.
-    //
-    // Triggers fire BEFORE the power-up menu callback below so any
-    // freezing plugin they start (Gravity cascade today, future
-    // freezing specials tomorrow) flips its `freezesGameplay` true
-    // synchronously, and the menu's gate (showNext in
-    // menus/powerup.js) defers cleanly. Without this ordering, the
-    // menu would surface on top of a still-running cascade.
-    this._notifyPlugins('onClear', cleared);
-
-    // Power-up menu callback — fires AFTER triggers so the gate has
-    // a settled view of whether any plugin is freezing gameplay. The
-    // pendingChoices counter itself was bumped above; the callback
-    // here is purely the "open the menu" signal.
-    if (milestonesEarned > 0) {
-      this.onPowerUpChoice?.(this.pendingChoices);
-    }
+    // Hand off the entire scoring + progression + plugin-notify
+    // ceremony to the match policy. It mutates score, combo,
+    // lastClearWasTetris, lines, level, pendingChoices, the
+    // menu-settle timer, fires beforeClear / onClear /
+    // onPerfectClear / onTetris / onCombo / onPowerUpChoice, and
+    // resets clearingResult + clearingRows + clearTimer. Game's
+    // only remaining job is the spawn-handling tail below — that
+    // branches on cascade / fill / standard, which the policy
+    // doesn't know about.
+    this.mode.match.applyClearEffects(this, this.clearingResult);
 
     // Spawn handling. Three branches:
     //
@@ -882,16 +876,20 @@ export class Game {
       }
     }
 
-    // Apply gravity. Plugins can modify the gravity-table lookup index
-    // via the modifyGravityIndex hook (Hyped adds +1 per stack to
-    // make pieces fall faster than the player's actual level implies).
+    // Apply gravity. Each mode owns its own gravity curve (Tetris is
+    // the historic GRAVITY table, Puyo's is faster); the engine just
+    // looks up the slot for `level - 1` and clamps against that
+    // table's length. Plugins can modify the lookup index via the
+    // modifyGravityIndex hook (Hyped adds +1 per stack to make
+    // pieces fall faster than the player's actual level implies).
+    const gravityTable = this.mode.gravityTable;
     const gravityIdx = Math.min(
       this._reduceHookValue('modifyGravityIndex', this.level - 1),
-      GRAVITY.length - 1,
+      gravityTable.length - 1,
     );
     const gravityMs = this.softDropping
       ? SOFT
-      : GRAVITY[Math.max(0, gravityIdx)];
+      : gravityTable[Math.max(0, gravityIdx)];
     this.dropTimer += dt;
     while (this.dropTimer >= gravityMs) {
       this.dropTimer -= gravityMs;
@@ -904,6 +902,8 @@ export class Game {
   // -------- Helpers used by the renderer --------
 
   ghostY() {
-    return this.current ? ghostPosition(this.board, this.current) : 0;
+    return this.current
+      ? this.mode.pieces.ghostPosition(this.board, this.current)
+      : 0;
   }
 }

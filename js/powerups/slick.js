@@ -43,6 +43,9 @@ export default {
   id: 'slick',
   name: 'Slick',
   description: 'Pieces lock slightly later',
+  // Tetris-only — the lock-delay window doesn't carry meaning in
+  // Puyo (pairs lock immediately on collision, no soft-drop dance).
+  modes: ['tetris'],
   available: (game) => !game.unlocks.slick,
   apply:     (game) => { game.unlocks.slick = true; },
 

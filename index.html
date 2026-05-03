@@ -48,7 +48,11 @@
           <div class="stat" id="score">0</div>
           <h2>Level</h2>
           <div class="stat" id="level">1</div>
-          <h2>Lines</h2>
+          <!-- Header text is mode-aware: 'Lines' in Tetris, 'Chains' in
+               Puyo. hud.js writes mode.hud.progressLabel into this
+               element on every sync, so the label tracks the active
+               mode without main.js needing to branch. -->
+          <h2 id="lines-label">Lines</h2>
           <div class="stat" id="lines">0</div>
           <div id="blessing-section" class="hidden">
             <h2>Blessings</h2>
@@ -65,11 +69,17 @@
         <canvas id="board" width="300" height="600"></canvas>
         <div id="notifications"></div>
         <div id="overlay" class="hidden">PAUSED<small>PRESS P OR ESC TO RESUME</small></div>
-        <!-- Debug button — pinned inside the board wrap; only visible
-             while the game is paused. Clicking it opens #debug-menu so
-             the player can apply blessings & curses on demand and tune
-             the level for testing. main.js shows/hides it based on
-             game.paused. -->
+        <!-- Pause-overlay launcher buttons — pinned inside the board
+             wrap; only visible while the game is paused. main.js
+             shows/hides both based on game.paused.
+               • MAIN MENU returns to the splash screen, abandoning
+                 the current run (no confirm — pause is already a
+                 deliberate action; players who didn't mean to leave
+                 can re-enter via Play on the splash).
+               • DEBUG opens #debug-menu so the player can apply
+                 blessings & curses on demand and tune the level for
+                 testing. -->
+        <button id="main-menu-btn" class="hidden" type="button">MAIN MENU</button>
         <button id="debug-btn" class="hidden" type="button">DEBUG</button>
       </div>
 
@@ -115,8 +125,16 @@
       <h1 class="menu-title" aria-label="Stackoverflow">
         <span class="menu-title-text">STACKOVERFLOW</span>
       </h1>
+      <!-- Mode picker — two primary actions, one per game mode. The
+           original PLAY button kept its #play-btn id so existing
+           input wiring (start chime, hover sound, splash hide path)
+           still hits Tetris by default. The Puyo button is a parallel
+           handler in main.js that calls game.start(PUYO_MODE). -->
       <button id="play-btn" class="menu-btn" type="button">
-        <span class="menu-btn-text">PLAY</span>
+        <span class="menu-btn-text">PLAY TETRIS</span>
+      </button>
+      <button id="play-puyo-btn" class="menu-btn" type="button">
+        <span class="menu-btn-text">PLAY PUYO</span>
       </button>
       <!-- Secondary action — opens the global leaderboard browse
            overlay. Hidden gracefully (via JS) when js/config.js has
@@ -184,6 +202,20 @@
   <div id="leaderboard-browse" class="hidden">
     <div class="leaderboard-card leaderboard-card-wide">
       <h2 class="leaderboard-title">TOP SCORES</h2>
+      <!-- Mode tabs — each posts to its own table (scores /
+           scores_puyo) so the leaderboards don't mix. The active
+           tab decides which mode to fetch on every open and on
+           every click. js/leaderboard.js owns the click handlers
+           and the .active class. -->
+      <div class="lb-tabs" id="lb-tabs" role="tablist">
+        <button class="lb-tab active" type="button"
+                role="tab" data-mode="tetris">TETRIS</button>
+        <button class="lb-tab" type="button"
+                role="tab" data-mode="puyo">PUYO</button>
+      </div>
+      <!-- Header is mode-aware: "Lines" for tetris, "Chains" for
+           puyo. JS rewrites this on tab switch so the column reads
+           right under whichever mode is in view. -->
       <div class="leaderboard-status" id="lb-status">Loading…</div>
       <div class="leaderboard-list-wrap">
         <table class="leaderboard-list" id="lb-list">
@@ -192,7 +224,7 @@
               <th class="lb-col-rank">#</th>
               <th class="lb-col-name">Name</th>
               <th class="lb-col-score">Score</th>
-              <th class="lb-col-lines">Lines</th>
+              <th class="lb-col-lines" id="lb-col-lines-header">Lines</th>
               <th class="lb-col-level">Lv</th>
               <th class="lb-col-time">Time</th>
             </tr>

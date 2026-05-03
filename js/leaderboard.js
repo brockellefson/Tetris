@@ -110,9 +110,15 @@ export function setupLeaderboard(game) {
   const sSkip$     = document.getElementById('ls-skip-btn');
 
   // Browse overlay
-  const bStatus$   = document.getElementById('lb-status');
-  const bRows$     = document.getElementById('lb-rows');
-  const bClose$    = document.getElementById('lb-close-btn');
+  const bStatus$       = document.getElementById('lb-status');
+  const bRows$         = document.getElementById('lb-rows');
+  const bClose$        = document.getElementById('lb-close-btn');
+  const bTabs$         = document.getElementById('lb-tabs');
+  const bLinesHeader$  = document.getElementById('lb-col-lines-header');
+  // The "Lines" / "Chains" header text per mode. Mirrors what the
+  // in-game HUD shows next to game.lines so a Puyo run's "Chains"
+  // column header tracks the same vocabulary on the leaderboard.
+  const COL_LABEL_BY_MODE = { tetris: 'Lines', puyo: 'Chains' };
 
   // -------- Splash launcher visibility --------
   // The LEADERBOARD button is hidden via the .hidden class on a
@@ -160,6 +166,10 @@ export function setupLeaderboard(game) {
       blessings:  snapshotBlessings(game),
       curses:     snapshotCurses(game),
       specials:   game.unlocks?.specials ?? {},
+      // Captured at show-time so the submit posts to the right
+      // mode's leaderboard even if game.mode changes between the
+      // game-over moment and the player hitting SUBMIT.
+      mode:       game.mode?.id ?? 'tetris',
     };
     sScore$.textContent = snap.score.toLocaleString();
     sLines$.textContent = snap.lines.toLocaleString();
@@ -208,7 +218,11 @@ export function setupLeaderboard(game) {
     sStatus$.textContent = 'Saving…';
     sStatus$.className   = 'leaderboard-status';
 
-    const result = await submitScore({ ...pendingSnap, name });
+    // Route to the right table for the run's mode — Tetris's
+    // scores live in `scores`, Puyo's in `scores_puyo`. The
+    // snapshot also captures the mode at show-time so a mode
+    // switch between game-over and submit doesn't cross-post.
+    const result = await submitScore({ ...pendingSnap, name }, pendingSnap.mode);
     if (!result.ok) {
       sStatus$.textContent = result.error || 'Save failed';
       sStatus$.className   = 'leaderboard-status error';
@@ -225,9 +239,13 @@ export function setupLeaderboard(game) {
     // before the browse overlay covers it.
     setTimeout(() => {
       closeSubmit();
-      // Pass the just-inserted row's id so the browser can highlight
-      // it in the list. Falls back gracefully if the id is missing.
-      showBrowse({ highlightId: result.row?.id });
+      // Pass the just-inserted row's id AND its mode so the browser
+      // opens on the right tab and highlights the row in the list.
+      // Falls back gracefully if either is missing.
+      showBrowse({
+        highlightId: result.row?.id,
+        mode:        pendingSnap?.mode,
+      });
     }, 600);
   }
 
@@ -277,38 +295,42 @@ export function setupLeaderboard(game) {
   // Track the highlighted row's id so a refresh keeps the gold
   // marker in place if the same row is still in the top N.
   let highlightedId = null;
+  // Which mode's leaderboard is currently in view. Sticks across
+  // tab clicks within one open and resets on every fresh open
+  // (showBrowse picks a default — see below).
+  let currentMode = 'tetris';
 
-  async function showBrowse({ highlightId } = {}) {
-    if (!isEnabled()) {
-      // Surface the missing-config case directly in the overlay
-      // rather than silently no-op'ing — clearest path for someone
-      // who's just cloned the repo and hit the button.
-      bStatus$.textContent = 'Leaderboard not configured (see LEADERBOARD.md)';
-      bStatus$.className   = 'leaderboard-status error';
-      bRows$.innerHTML     = '';
-      browse$.classList.remove('hidden');
-      playMenuOpenSound();
-      requestAnimationFrame(() => bClose$.focus());
-      return;
+  // Reflect the active mode in the tab strip (gold pill on the
+  // matching tab) and update the "Lines" / "Chains" column header
+  // so the table reads correctly. Pure DOM toggle, no fetch — the
+  // caller decides when to refetch.
+  function syncTabs(mode) {
+    if (!bTabs$) return;
+    for (const btn of bTabs$.querySelectorAll('.lb-tab')) {
+      btn.classList.toggle('active', btn.dataset.mode === mode);
     }
-    if (typeof highlightId === 'number') highlightedId = highlightId;
+    if (bLinesHeader$) {
+      bLinesHeader$.textContent = COL_LABEL_BY_MODE[mode] ?? 'Lines';
+    }
+  }
+
+  // Fetch + render whichever mode is active. Pulled out of
+  // showBrowse so a tab click can refresh the table without
+  // re-running the modal-open ceremony.
+  async function loadMode(mode) {
+    currentMode = mode;
+    syncTabs(mode);
 
     bStatus$.textContent = 'Loading…';
     bStatus$.className   = 'leaderboard-status';
     bRows$.innerHTML     = '';
-    browse$.classList.remove('hidden');
-    playMenuOpenSound();
-    // Focus the CLOSE button so it's visually selected (gold focus
-    // ring) and Enter / Space close the overlay without the player
-    // having to mouse over to it. Deferred a frame so the modal-open
-    // animation has already started — focusing mid-paint can cause
-    // the page to scroll oddly.
-    requestAnimationFrame(() => bClose$.focus());
 
-    const result = await fetchTopScores(25);
-    // The user might close the overlay before the request returns
-    // — bail in that case so we don't paint into a hidden surface.
+    const result = await fetchTopScores(25, mode);
+    // The user might close the overlay or click a different tab
+    // before the request returns — bail in either case so we don't
+    // paint stale data into the visible table.
     if (!browseOpen()) return;
+    if (currentMode !== mode) return;
 
     if (!result.ok) {
       bStatus$.textContent = result.error || 'Load failed';
@@ -323,6 +345,41 @@ export function setupLeaderboard(game) {
     }
     bStatus$.textContent = '';
     renderRows(scores, highlightedId);
+  }
+
+  async function showBrowse({ highlightId, mode } = {}) {
+    if (!isEnabled()) {
+      // Surface the missing-config case directly in the overlay
+      // rather than silently no-op'ing — clearest path for someone
+      // who's just cloned the repo and hit the button.
+      bStatus$.textContent = 'Leaderboard not configured (see LEADERBOARD.md)';
+      bStatus$.className   = 'leaderboard-status error';
+      bRows$.innerHTML     = '';
+      browse$.classList.remove('hidden');
+      playMenuOpenSound();
+      requestAnimationFrame(() => bClose$.focus());
+      return;
+    }
+    if (typeof highlightId === 'number') highlightedId = highlightId;
+
+    // Default tab on open: explicit `mode` arg wins (used by the
+    // post-submit "view top scores" link to land on the run's
+    // mode), then game.mode.id if a run is in progress, then
+    // Tetris. Splash always starts on Tetris because game.mode.id
+    // is set to TETRIS_MODE in the constructor before the player
+    // picks a mode.
+    const initialMode = mode ?? game.mode?.id ?? 'tetris';
+
+    browse$.classList.remove('hidden');
+    playMenuOpenSound();
+    // Focus the CLOSE button so it's visually selected (gold focus
+    // ring) and Enter / Space close the overlay without the player
+    // having to mouse over to it. Deferred a frame so the modal-open
+    // animation has already started — focusing mid-paint can cause
+    // the page to scroll oddly.
+    requestAnimationFrame(() => bClose$.focus());
+
+    await loadMode(initialMode);
   }
 
   function renderRows(scores, highlightId) {
@@ -363,6 +420,29 @@ export function setupLeaderboard(game) {
 
   // -------- Browse overlay wiring --------
   wireMenuSounds(bClose$, { shouldPlay: browseOpen });
+
+  // Tab clicks — re-route the table to whichever mode the player
+  // picked. The active tab's gold pop comes from the .active class
+  // we toggle in syncTabs (called from loadMode). Wired via
+  // delegation on the tab strip so we don't have to grab each
+  // button individually; keeps adding a third tab a one-line
+  // change in index.html.
+  if (bTabs$) {
+    for (const btn of bTabs$.querySelectorAll('.lb-tab')) {
+      wireMenuSounds(btn, { shouldPlay: browseOpen });
+    }
+    bTabs$.addEventListener('click', (e) => {
+      const btn = e.target.closest('.lb-tab');
+      if (!btn) return;
+      const mode = btn.dataset.mode;
+      if (!mode || mode === currentMode) return;
+      // Drop the run-row highlight when switching modes — it only
+      // makes sense in the table the run was actually submitted to.
+      highlightedId = null;
+      loadMode(mode);
+    });
+  }
+
   bClose$.addEventListener('click', () => {
     browse$.classList.add('hidden');
   });

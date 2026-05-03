@@ -12,6 +12,11 @@ export default {
   id: 'curse-hyped',
   name: 'Hyped',
   description: 'Pieces fall one level faster.',
+  // Tetris-only — Puyo's gravity table is independent of the
+  // Tetris GRAVITY constant and modifyGravityIndex routes through
+  // Tetris's level → speed lookup. Puyo difficulty scaling will
+  // ship its own modifier when needed.
+  modes: ['tetris'],
   available: () => true,
   apply: (game) => { game.curses.hyped += 1; },
 

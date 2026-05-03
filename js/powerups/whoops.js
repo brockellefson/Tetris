@@ -94,6 +94,10 @@ export default {
   id: 'whoops',
   name: 'Whoops',
   description: 'Press W to undo your last piece. 5-line cooldown.',
+  // Tetris-only — the snapshot/restore loop is wired against
+  // Tetris's piece + queue + B2B/combo state. Puyo will get its
+  // own undo (or none) when its plugin set lands.
+  modes: ['tetris'],
   available: (game) => !game.unlocks.whoops,
   apply: (game) => {
     game.unlocks.whoops = true;

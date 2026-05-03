@@ -917,31 +917,39 @@ canvas { display: block; }
 /* The DEBUG launcher button — pinned to the bottom-center of the
    board wrap while paused. Stays out of the way until the player
    actually pauses the game; main.js flips .hidden based on
-   game.paused. */
-#debug-btn {
+   game.paused. The MAIN MENU button uses the same look but a
+   cyan-to-pink palette to read as a primary action ("leave the run")
+   versus DEBUG's quieter violet ("dev panel"), and stacks just above
+   the Debug button so both pause-only surfaces share the same
+   bottom-of-board real estate without overlapping. */
+#debug-btn,
+#main-menu-btn {
   position: absolute;
   left: 50%;
-  bottom: 32px;
   transform: translateX(-50%);
   z-index: 6;
   background: linear-gradient(180deg, rgba(42, 0, 68, 0.95) 0%, rgba(20, 0, 43, 0.95) 100%);
-  border: 2px solid var(--neon-violet);
   border-radius: 4px;
   padding: 10px 28px;
-  color: var(--neon-violet);
   font-family: 'Orbitron', sans-serif;
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 4px;
   text-transform: uppercase;
   cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+
+#debug-btn {
+  bottom: 32px;
+  border: 2px solid var(--neon-violet);
+  color: var(--neon-violet);
   text-shadow:
     0 0 6px var(--neon-violet),
     0 0 14px rgba(176, 38, 255, 0.6);
   box-shadow:
     0 0 10px rgba(176, 38, 255, 0.55),
     0 0 22px rgba(176, 38, 255, 0.35);
-  transition: border-color 0.15s, color 0.15s, transform 0.15s, box-shadow 0.15s;
 }
 #debug-btn.hidden { display: none; }
 
@@ -957,6 +965,33 @@ canvas { display: block; }
   box-shadow:
     0 0 14px var(--neon-cyan),
     0 0 32px rgba(0, 245, 255, 0.5);
+}
+
+#main-menu-btn {
+  bottom: 84px;
+  border: 2px solid var(--neon-cyan);
+  color: var(--neon-cyan);
+  text-shadow:
+    0 0 6px var(--neon-cyan),
+    0 0 14px rgba(0, 245, 255, 0.6);
+  box-shadow:
+    0 0 10px rgba(0, 245, 255, 0.55),
+    0 0 22px rgba(0, 245, 255, 0.35);
+}
+#main-menu-btn.hidden { display: none; }
+
+#main-menu-btn:hover,
+#main-menu-btn:focus {
+  outline: none;
+  border-color: var(--neon-pink);
+  color: var(--neon-pink);
+  transform: translateX(-50%) translateY(-2px);
+  text-shadow:
+    0 0 8px var(--neon-pink),
+    0 0 18px rgba(255, 60, 172, 0.7);
+  box-shadow:
+    0 0 14px var(--neon-pink),
+    0 0 32px rgba(255, 60, 172, 0.5);
 }
 
 /* The debug menu modal proper — same layering rules as the powerup
@@ -1232,7 +1267,8 @@ canvas { display: block; }
 .debug-close-btn:focus-visible,
 .leaderboard-btn:focus-visible,
 .leaderboard-row:focus-visible,
-#debug-btn:focus-visible {
+#debug-btn:focus-visible,
+#main-menu-btn:focus-visible {
   outline: 2px solid #fff;
   outline-offset: 2px;
 }
@@ -1526,6 +1562,55 @@ canvas { display: block; }
    The just-submitted row gets the gold .highlight class so the
    player can spot their entry at a glance, mirroring the
    "active option" gold-yellow convention used by .debug-pill.active. */
+/* Mode-tab strip on top of the browse leaderboard. Two tabs
+   (Tetris / Puyo) — each picks which mode's table the rest of the
+   overlay reads from. The active tab pops in the same neon-yellow
+   gold the rest of the UI uses for "this is on" feedback (debug
+   pills, blessing tags, the perfect-clear notification). */
+.lb-tabs {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.lb-tab {
+  background: linear-gradient(180deg, rgba(0, 245, 255, 0.06) 0%, rgba(0, 245, 255, 0.02) 100%);
+  border: 1px solid var(--neon-cyan);
+  border-radius: 4px;
+  padding: 8px 18px;
+  color: var(--neon-cyan);
+  font-family: 'Orbitron', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  cursor: pointer;
+  text-shadow: 0 0 6px var(--neon-cyan);
+  box-shadow:
+    0 0 6px rgba(0, 245, 255, 0.35),
+    inset 0 0 6px rgba(0, 245, 255, 0.12);
+  transition: border-color 0.15s, color 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+.lb-tab:hover,
+.lb-tab:focus {
+  outline: none;
+  transform: translateY(-1px);
+  box-shadow:
+    0 0 12px rgba(0, 245, 255, 0.6),
+    inset 0 0 8px rgba(0, 245, 255, 0.2);
+}
+.lb-tab.active {
+  background: linear-gradient(180deg, rgba(255, 247, 0, 0.14) 0%, rgba(255, 247, 0, 0.04) 100%);
+  border-color: var(--neon-yellow);
+  color: var(--neon-yellow);
+  text-shadow:
+    0 0 8px var(--neon-yellow),
+    0 0 16px var(--neon-yellow);
+  box-shadow:
+    0 0 10px rgba(255, 247, 0, 0.6),
+    inset 0 0 8px rgba(255, 247, 0, 0.2);
+}
+
 .leaderboard-list-wrap {
   max-height: 50vh;
   overflow-y: auto;

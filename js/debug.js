@@ -33,7 +33,6 @@
 //     into it doesn't trip the global pause toggle in input.js.
 // ============================================================
 
-import { COLS } from './constants.js';
 import {
   wireMenuSounds,
   playCycleSound,
@@ -87,7 +86,7 @@ const SEED_FILL_BOTTOM = 0.92;
 const SEED_TYPES = ['I', 'O', 'T', 'S', 'Z', 'J', 'L'];
 
 function seedBoard(game) {
-  const cols = game.board[0]?.length ?? COLS;
+  const cols = game.board[0]?.length ?? game.layout.cols;
   const rows = game.board.length;
   // Wipe the playfield (and the parallel specials grid) so the seed
   // is the only thing on the board. Without clearing specials we'd
@@ -337,7 +336,7 @@ const DEBUG_CURSES = [
     apply:    (g) => growthCurse.apply(g),
     remove:   (g) => {
       g.curses.extraCols = 0;
-      while (g.board[0] && g.board[0].length > COLS) {
+      while (g.board[0] && g.board[0].length > g.layout.cols) {
         const before = g.board[0].length;
         g._interceptInput('growth:removeColumn');
         if (g.board[0].length === before) break;
@@ -493,18 +492,12 @@ export function setupDebug(game) {
     onMove: playCycleSound,
   });
 
-  // Arrow-key nav for the pause overlay itself — the Debug button is
-  // the only interactive surface there, so the very first arrow press
-  // while paused focuses it. Enter/Space then opens the menu (native
-  // button activation), at which point the launcher hides under the
-  // debug-menu modal and the nav above takes over. Active only while
-  // the launcher is on screen AND the debug menu isn't yet open, so
-  // it doesn't fight the panel-level nav.
-  wireArrowNav({
-    getButtons: () => (launcherVisible() && !menuVisible()) ? [debugBtn$] : [],
-    isOpen:     ()  => launcherVisible() && !menuVisible(),
-    onMove: playCycleSound,
-  });
+  // The pause-overlay arrow-nav (which used to live here when Debug
+  // was the only button on the overlay) is now owned by main.js,
+  // which has visibility into every pause-only launcher button.
+  // Enter/Space on the focused Debug button still opens this menu via
+  // the click handler above, at which point the launcher hides under
+  // the modal and the panel-level nav (`nav` above) takes over.
 
   function showMenu() {
     // Snap the input to the live level so opening mid-game doesn't

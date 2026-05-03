@@ -28,6 +28,21 @@ export const COLORS = {
   // sits inside the synthwave palette instead of looking like an
   // alien chrome chip on the board.
   FILL: '#ead6ff',
+  // ---- Puyo Puyo palette ----
+  // Five colors — the canonical balanced puyo set. Picked to match
+  // the synthwave board: red leans hot-pink, green leans acid, blue
+  // leans electric, yellow leans warm, purple leans toward the
+  // ultraviolet end so all five read distinctly even sitting next
+  // to each other in a tight stack. Each tone is shifted a hair
+  // away from primary so the board doesn't look like a kindergarten
+  // chart, and each one is far enough from the others in hue that
+  // colorblind players (red/green deficient excepted) can still
+  // tell them apart.
+  R: '#ff4566',   // signal red
+  G: '#3eff8a',   // toxic green
+  B: '#3a96ff',   // hyperblue
+  Y: '#ffd84a',   // citrus yellow
+  P: '#c66bff',   // ultraviolet
   GHOST: 'rgba(255,180,255,0.18)',
   // The grid and background lean deep magenta-purple — the iconic
   // "outrun horizon" look. The grid lines are a soft pink-violet so

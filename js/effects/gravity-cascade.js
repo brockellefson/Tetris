@@ -46,13 +46,8 @@
 import {
   CLEAR_DURATION,
   GRAVITY_POWER_STEP,
-  lineClearScore,
-  B2B_MULTIPLIER,
-  COMBO_BONUS,
-  PERFECT_CLEAR_BONUS,
-  MENU_SETTLE_MS,
 } from '../constants.js';
-import { collides, findFullRows, removeRows } from '../board.js';
+import { collides } from '../board.js';
 
 // Convenience accessor — slot lives in the plugin-state bag, seeded
 // by this plugin's reset hook.
@@ -114,91 +109,40 @@ function fallStep(game) {
   return moved;
 }
 
-// Mirrors the standard completeClear()'s scoring path (line score,
-// B2B, combo, perfect-clear, lines/level, milestone power-up
-// choices) but does NOT spawn a new piece — the saved piece is
-// restored at the end of the whole cascade by endCascade(), not after
-// every clear. After scoring, we loop back into the 'fall' phase to
-// see if the cleared rows expose more floating blocks that can drop.
+// Hand off the entire scoring + progression + plugin-notify
+// ceremony to the active mode's match policy — the same path
+// Game.completeClear takes. The policy mutates score / combo /
+// lastClearWasTetris / lines / level / pendingChoices /
+// _menuSettleTimer, fires beforeClear / onClear / onPerfectClear /
+// onTetris / onCombo / onPowerUpChoice in the right order, and
+// resets clearingRows + clearTimer. The cascade then transitions
+// back to 'fall' to see if the cleared rows expose more floating
+// blocks. NO new piece spawns here — the saved piece is restored
+// at the end of the whole cascade by endCascade(), not after every
+// per-step clear.
 //
-// The beforeClear → removeRows → onClear hook order matches Game's
-// standard completeClear so the specials plugin (which captures
-// triggers in beforeClear and fires them in onClear) sees a
-// gravity-driven clear identically to a player-driven one. That's
-// what gives chained-special detonations their natural recursion:
-// a Gravity special clearing a row that contains another Gravity
-// special re-enters this engine through the second special's
-// onTrigger, and the new cascade picks up where this one left off.
+// Cascade-driven clears can collapse 5+ rows at once when a Bomb
+// blast (or chained specials) leaves a tall stack of full rows; the
+// match policy's lineClearScore handles that case (LINE_SCORES[5+]
+// would be undefined and silently corrupt the score otherwise).
+//
+// The beforeClear → onClear hook order matches Game's standard
+// completeClear so the specials plugin (which captures triggers in
+// beforeClear and fires them in onClear) sees a gravity-driven
+// clear identically to a player-driven one. That's what gives
+// chained-special detonations their natural recursion: a Bomb on a
+// row this cascade just cleared calls back into runSpecialTrigger,
+// which is idempotent on cascade re-entry (we're still inside an
+// active cascade so startGravityCascade no-ops).
 function completeCascadeClear(game) {
-  const cleared = game.clearingRows.length;
-  game._notifyPlugins('beforeClear', game.clearingRows);
-  removeRows(game.board, game.clearingRows);
-
-  const wasB2B = (cleared === 4 && game.lastClearWasTetris);
-
-  // lineClearScore tolerates cleared > 4 — the cascade can collapse
-  // many rows simultaneously when a Bomb (or chained specials) leaves
-  // a tall stack of full rows after the fall pass. Without the
-  // helper, LINE_SCORES[5] would be undefined and `score += NaN`
-  // would silently corrupt the score for the rest of the run.
-  let lineScore = lineClearScore(cleared) * game.level;
-  if (wasB2B) lineScore = Math.floor(lineScore * B2B_MULTIPLIER);
-  game.score += lineScore;
-
-  game.combo += cleared;
-  game.score += COMBO_BONUS * game.combo * game.level;
-
-  game.lastClearWasTetris = (cleared === 4);
-
-  const perfect = game.board.every(row => row.every(cell => cell === null));
-  if (perfect) game.score += PERFECT_CLEAR_BONUS;
-
-  const linesBefore = game.lines;
-  game.lines += cleared;
-  game.level = Math.floor(game.lines / 10) + 1;
-
-  // Roguelite power-up milestones — same rule as completeClear().
-  // The choice menu won't surface until endCascade() fires the
-  // onPluginIdle transition, so any picks earned mid-cascade queue up
-  // cleanly behind the animation.
-  let milestonesEarned =
-    Math.floor(game.lines / 5) - Math.floor(linesBefore / 5);
-  if (!game.firstClearAwarded && cleared > 0) {
-    game.firstClearAwarded = true;
-    milestonesEarned += 1;
-  }
-  game.pendingChoices += milestonesEarned;
-  // Arm the same universal menu-settle pause that completeClear uses
-  // when a milestone is earned. Held at full duration by Game.tick()
-  // until the cascade finishes (the cascade plugin freezes gameplay,
-  // and the timer's decrement gate refuses to count down while any
-  // plugin freezes), so the menu still won't surface mid-cascade —
-  // it just gets one extra beat after the cascade wraps up.
-  if (milestonesEarned > 0) {
-    game._menuSettleTimer = MENU_SETTLE_MS;
-  }
-
-  if (perfect)         game.onPerfectClear?.();
-  if (cleared === 4)   game.onTetris?.(wasB2B);
-  if (game.combo >= 2) game.onCombo?.(game.combo);
-
-  game.clearingRows = [];
-  game.clearTimer = 0;
+  // Pass the full result that the 'fall'-phase findClears stashed
+  // onto game.clearingResult — Tetris's applyClearEffects reads
+  // .rows off it, Puyo's reads .cells, and the renderer's per-cell
+  // wipe overlay reads .cells too.
+  game.mode.match.applyClearEffects(game, game.clearingResult);
   const s = gs(game);
   s.phase     = 'fall';
   s.stepTimer = 0;
-  // Specials' onClear fires their triggers BEFORE the power-up menu
-  // callback so any freezing plugin they start gets a chance to flip
-  // its gate first — same ordering rule completeClear() uses. A
-  // Gravity special on a row this cascade just cleared calls back
-  // into startGravityCascade, which is idempotent (we're still
-  // inside an active cascade so the call no-ops). Future special
-  // kinds (bombs, etc.) can fire freely without recursing into this
-  // engine.
-  game._notifyPlugins('onClear', cleared);
-  if (milestonesEarned > 0) {
-    game.onPowerUpChoice?.(game.pendingChoices);
-  }
 }
 
 // Wrap up the cascade and hand control back to the player. Two
@@ -248,6 +192,14 @@ function endCascade(game) {
 // twice is a no-op (Game just appends, but the second registration
 // would double-tick the cascade).
 export default {
+  // No `modes` field — this engine is intentionally universal.
+  // Tetris uses it for Bomb-blast debris settling and the debug
+  // "Gravity Cascade" pill; Puyo will use it as the post-clear
+  // settle pass that drops disconnected puyos into the holes left
+  // by a chain. The phases (fall → clearing → fall) and the
+  // beforeClear/onClear pipeline are mode-agnostic now that
+  // findClears + applyClearEffects come from `game.mode.match`.
+
   // Seed the gravity slot in the plugin-state bag on every
   // Game.reset(). Owns the slot's lifetime; nothing else writes here.
   reset(game) {
@@ -277,15 +229,23 @@ export default {
       s.stepTimer -= GRAVITY_POWER_STEP;
       const moved = fallStep(game);
       if (!moved) {
-        // Cascade settled. Any full rows? If so kick off the standard
-        // clear animation; completeCascadeClear() will resume the
-        // fall loop after the animation finishes.
-        const fullRows = findFullRows(game.board);
-        if (fullRows.length > 0) {
-          game.clearingRows = fullRows;
+        // Cascade settled. Anything cleared? Ask the active mode's
+        // match policy — for Tetris that's full-row detection; for
+        // Puyo it's flood-fill of connected same-color groups.
+        // Either way, completeCascadeClear() then resumes the fall
+        // loop after the animation finishes.
+        const result = game.mode.match.findClears(game.board);
+        if (result) {
+          game.clearingResult = result;
+          // Tetris populates clearingRows for the row-flash animation
+          // and the specials plugin's row-shift bookkeeping. Puyo
+          // leaves it empty — the renderer reads cells off
+          // clearingResult instead.
+          game.clearingRows = result.rows ?? [];
           game.clearTimer   = 0;
           s.phase           = 'clearing';
-          game.onLineClear?.(fullRows.length);
+          const clearedCount = result.rows?.length ?? result.cells?.length ?? 0;
+          game.onLineClear?.(clearedCount);
         } else {
           endCascade(game);
         }

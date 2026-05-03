@@ -52,8 +52,6 @@
 //   reset           clears boardSpecials on every Game.reset()
 
 import {
-  COLS,
-  ROWS,
   SPECIAL_BLOCK_BASE_CHANCE,
   SPECIAL_BLOCK_PER_LEVEL_BONUS,
   SPECIAL_BLOCK_MAX_CHANCE,
@@ -64,6 +62,7 @@ import {
   LUCKY_PER_LEVEL_PER_STACK,
   LUCKY_MAX_PER_STACK,
 } from '../constants.js';
+import { DEFAULT_LAYOUT } from '../layout.js';
 import { PIECES, transformLocalCoord } from '../pieces.js';
 import bombSpecial      from './bomb.js';
 import lightningSpecial from './lightning.js';
@@ -207,8 +206,12 @@ export function specialAtPieceCell(piece, r, c) {
 
 // ---- boardSpecials grid management ---------------------------
 
-// Build a fresh boardSpecials grid sized to match game.board.
-export function newBoardSpecials(cols = COLS, rows = ROWS) {
+// Build a fresh boardSpecials grid sized to match game.board. The
+// default layout is the historic 10×20 board so legacy callers that
+// pass nothing still work; the standard caller (this plugin's reset
+// hook below) reads dimensions off the live board so a runtime-grown
+// or mode-swapped playfield gets a matched parallel grid.
+export function newBoardSpecials(cols = DEFAULT_LAYOUT.cols, rows = DEFAULT_LAYOUT.rows) {
   return Array.from({ length: rows }, () => Array(cols).fill(null));
 }
 
@@ -216,7 +219,7 @@ export function newBoardSpecials(cols = COLS, rows = ROWS) {
 // two-phase splice-then-unshift pattern (interleaving would corrupt
 // indices on multi-line clears — see the comment in board.js).
 function removeRowsSpecials(specials, rows) {
-  const cols = specials[0]?.length ?? COLS;
+  const cols = specials[0]?.length ?? 0;
   const sorted = [...rows].sort((a, b) => b - a);
   for (const r of sorted) specials.splice(r, 1);
   for (let i = 0; i < sorted.length; i++) {
@@ -310,11 +313,17 @@ let _pendingHoldSpecials = null;
 
 export default {
   id: 'specials',
+  // Tetris-only — every concrete special (Bomb / Lightning / Welder)
+  // and every blessing tier currently in ALL_POWERUPS is wired
+  // against tetromino spawn-tagging, full-row clear pipelines, and
+  // Tetris-specific cards. When Puyo lands, its special-block kit
+  // (if any) ships as a parallel plugin under js/modes/puyo/.
+  modes: ['tetris'],
 
   // ---- Lifecycle ----
 
   reset(game) {
-    const cols = game.board[0]?.length ?? COLS;
+    const cols = game.board[0]?.length ?? game.layout.cols;
     const rows = game.board.length;
     game._pluginState.specials = {
       // Parallel-to-game.board grid storing each cell's special kind.

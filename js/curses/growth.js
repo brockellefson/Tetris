@@ -14,8 +14,6 @@
 // the player gets the same number of pieces to fill more space —
 // which is why this lives under curses, not power-ups.
 
-import { COLS } from '../constants.js';
-
 const MAX_EXTRA_COLS = 5;
 
 // Append one column to the right edge of the board. Existing block
@@ -31,12 +29,13 @@ function addColumn(game) {
 // Inverse of addColumn — used by the Dispell blessing when undoing a
 // Growth stack. Refuses (and returns false) if shrinking would clip
 // either a locked block or any cell of the active piece, so it can
-// never trap or game-over the player. Also clamps at the default
-// COLS so we never go narrower than a stock board. Returns true iff
-// the column was actually removed.
+// never trap or game-over the player. Also clamps at the layout's
+// natural width so we never go narrower than a stock board for the
+// current mode (10 for Tetris; future modes seed their own value).
+// Returns true iff the column was actually removed.
 function tryRemoveColumn(game) {
   if (!game.board.length) return false;
-  if (game.board[0].length <= COLS) return false;
+  if (game.board[0].length <= game.layout.cols) return false;
   const lastCol = game.board[0].length - 1;
   if (game.board.some(row => row[lastCol] !== null)) return false;
   if (game.current) {
@@ -52,6 +51,10 @@ export default {
   id: 'curse-growth',
   name: 'Growth',
   description: 'Widens the playfield by one column. Stacks up to +5.',
+  // Tetris-only — Puyo's 6-wide field is already narrow; widening
+  // it would soften every match, the opposite of a curse. Puyo
+  // would ship its own field-altering debuffs.
+  modes: ['tetris'],
   // Hide once we've maxed out — picking a 6th time would offer no
   // visible effect and the menu should surface a different curse.
   available: (game) => game.curses.extraCols < MAX_EXTRA_COLS,

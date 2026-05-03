@@ -44,6 +44,7 @@ export function setupHUD() {
   const scoreEl        = document.getElementById('score');
   const levelEl        = document.getElementById('level');
   const linesEl        = document.getElementById('lines');
+  const linesLabelEl   = document.getElementById('lines-label');
   const holdPanel$     = document.getElementById('hold-panel');
   const nextPanel$     = document.getElementById('next-panel');
   const blessingSection$ = document.getElementById('blessing-section');
@@ -71,6 +72,7 @@ export function setupHUD() {
   let _lastScoreText = '';
   let _lastLevelText = '';
   let _lastLinesText = '';
+  let _lastLinesLabel = '';
 
   // ---- Floating notifications (combo / TETRIS / perfect clear) ----
   // CSS owns the animation; JS just appends the element and removes it
@@ -93,22 +95,35 @@ export function setupHUD() {
   }
 
   // ---- Hold / Next panel visibility ----
-  // Hide the entire panel when the player hasn't unlocked it yet.
-  // Each Next-canvas slot also hides individually so a partial
-  // Psychic unlock (say nextCount = 2) doesn't leave empty boxes.
+  // Tetris gates both panels behind blessings (Hold / Psychic) so a
+  // fresh run starts with the side rails empty until the player
+  // earns those upgrades. Puyo doesn't have a blessing pool yet, so
+  // we apply mode-specific defaults instead:
+  //   Tetris — Hold panel iff unlocks.hold; Next iff unlocks.nextCount > 0.
+  //   Puyo   — Next panel always on (showing 3 upcoming pairs); Hold
+  //            never on (Puyo doesn't have a hold mechanic).
+  // The per-canvas visibility loop also gets a mode branch so Puyo's
+  // 3-pair lookahead doesn't leave empty boxes from Tetris's 5-slot
+  // layout.
+  const PUYO_NEXT_VISIBLE = 3;
   function syncUnlocks(game) {
-    const holdD = game.unlocks.hold ? '' : 'none';
+    const isPuyo = game.mode?.id === 'puyo';
+
+    const holdVisible = isPuyo ? false : game.unlocks.hold;
+    const holdD = holdVisible ? '' : 'none';
     if (holdD !== _lastHoldDisplay) {
       holdPanel$.style.display = holdD;
       _lastHoldDisplay = holdD;
     }
-    const nextD = game.unlocks.nextCount > 0 ? '' : 'none';
+
+    const nextCount = isPuyo ? PUYO_NEXT_VISIBLE : game.unlocks.nextCount;
+    const nextD = nextCount > 0 ? '' : 'none';
     if (nextD !== _lastNextPanelDisplay) {
       nextPanel$.style.display = nextD;
       _lastNextPanelDisplay = nextD;
     }
     for (let i = 0; i < nextCanvases.length; i++) {
-      const d = i < game.unlocks.nextCount ? '' : 'none';
+      const d = i < nextCount ? '' : 'none';
       if (d !== _lastNextCanvasDisplay[i]) {
         nextCanvases[i].style.display = d;
         _lastNextCanvasDisplay[i] = d;
@@ -257,6 +272,11 @@ export function setupHUD() {
   // ---- Score / Level / Lines stats ----
   // textContent writes still trigger a recalc of any ancestor with
   // intrinsic sizing, so skip when unchanged.
+  //
+  // The "Lines" header is mode-aware — Tetris reads as "Lines",
+  // Puyo as "Chains" (game.lines counts chain steps in puyo runs).
+  // The label comes from `game.mode.hud.progressLabel` so adding a
+  // future mode is one bundle field, not a HUD branch.
   function syncStats(game) {
     const scoreText = game.score.toLocaleString();
     if (scoreText !== _lastScoreText) {
@@ -272,6 +292,11 @@ export function setupHUD() {
     if (linesText !== _lastLinesText) {
       linesEl.textContent = linesText;
       _lastLinesText = linesText;
+    }
+    const linesLabel = game.mode?.hud?.progressLabel ?? 'Lines';
+    if (linesLabel !== _lastLinesLabel) {
+      linesLabelEl.textContent = linesLabel;
+      _lastLinesLabel = linesLabel;
     }
   }
 
