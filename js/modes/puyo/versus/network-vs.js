@@ -67,6 +67,7 @@ export function setupNetworkVersus({
   playMenuStartSound,
   playMenuHoverSound,
   matchEndMenu,
+  matchmakingOverlay,
   returnToSplash,
 }) {
   const playVsBtn$ = document.getElementById('play-versus-btn');
@@ -118,23 +119,19 @@ export function setupNetworkVersus({
     startMatchmaking();
   });
 
-  // Esc during matchmaking cancels back to the splash. Matches the
-  // standard splash-menu Esc behavior — the player should always
-  // be able to back out.
-  document.addEventListener('keydown', (e) => {
-    if (!matchmaking) return;
-    if (e.key !== 'Escape') return;
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    cancelMatchmaking();
-  }, true);
+  // Esc-to-cancel and CANCEL-button-to-cancel both live inside
+  // matchmakingOverlay (it owns its own keyboard handling). The
+  // overlay calls back into us via the onCancel hook passed to
+  // show(), so we don't need a separate document keydown listener
+  // here for matchmaking.
 
   async function startMatchmaking() {
     matchmaking = true;
     myId = 'p_' + Math.random().toString(36).slice(2, 10);
     mySeedCandidate = randomSeed();
 
-    hud.showOverlay('VS NETWORK', 'FINDING OPPONENT…');
+    matchmakingOverlay?.show({ onCancel: cancelMatchmaking });
+    matchmakingOverlay?.setStatus('SEARCHING THE LOBBY…');
 
     matchmakingHandle = findMatch({ playerId: myId });
 
@@ -142,19 +139,18 @@ export function setupNetworkVersus({
     try {
       pairing = await matchmakingHandle.promise;
     } catch (err) {
-      // Cancelled or matchmaking error. The cancel path resets
-      // everything itself; only paint a status if it's an actual
-      // failure.
+      // Cancelled or matchmaking error. The cancel path already
+      // hid the overlay (CANCEL button → onCancel → cancelMatchmaking
+      // → overlay.hide). On a real failure we surface the warning
+      // status briefly before clearing.
       matchmaking = false;
       matchmakingHandle = null;
       const reason = String(err?.message || err || '');
       if (reason !== 'cancelled') {
-        hud.showOverlay('VS NETWORK', 'CONNECTION FAILED');
-        // Auto-clear after a beat so the splash button is usable
-        // again without forcing the player to interact.
-        setTimeout(() => { if (!game.started) hud.hideOverlay(); }, 2400);
-      } else {
-        hud.hideOverlay();
+        matchmakingOverlay?.setStatus('CONNECTION FAILED', { warning: true });
+        setTimeout(() => {
+          if (!game.started) matchmakingOverlay?.hide();
+        }, 2400);
       }
       return;
     }
@@ -165,13 +161,20 @@ export function setupNetworkVersus({
     peerId = pairing.peerId;
     const matchId = pairing.matchId;
 
+    // Found someone — flip the status to reflect what's happening
+    // next so a player who's been staring at the spinner sees clear
+    // forward progress before the match actually starts.
+    matchmakingOverlay?.setStatus('OPPONENT FOUND — CONNECTING…');
+
     // Build the per-match transport. We need the live Supabase
     // client (already cached by getSupabaseClient on first call
     // in matchmaking).
     const client = await getSupabaseClient();
     if (!client) {
-      hud.showOverlay('VS NETWORK', 'CONNECTION FAILED');
-      setTimeout(() => { if (!game.started) hud.hideOverlay(); }, 2400);
+      matchmakingOverlay?.setStatus('CONNECTION FAILED', { warning: true });
+      setTimeout(() => {
+        if (!game.started) matchmakingOverlay?.hide();
+      }, 2400);
       return;
     }
 
@@ -188,16 +191,19 @@ export function setupNetworkVersus({
     // exchange — both sides ship a fresh candidate with their
     // playerId, both compute the same agreedSeed independently.
     matchController.send('ready', { playerId: myId, seedCandidate: mySeedCandidate });
-    hud.showOverlay('VS NETWORK', 'WAITING FOR OPPONENT…');
+    matchmakingOverlay?.setStatus('WAITING FOR OPPONENT READY…');
   }
 
+  // Cancel from any source — splash button second-click, the
+  // overlay's CANCEL button, or its Esc handler. All paths converge
+  // here so the cleanup steps live in exactly one place.
   function cancelMatchmaking() {
-    if (!matchmaking) return;
+    if (!matchmaking && !matchmakingOverlay?.isOpen()) return;
     matchmakingHandle?.cancel('cancelled');
     matchmaking = false;
     matchmakingHandle = null;
     myId = null;
-    hud.hideOverlay();
+    matchmakingOverlay?.hide();
   }
 
   // All match-channel subscriptions in one place. Identical wiring
@@ -286,6 +292,7 @@ export function setupNetworkVersus({
     playMenuStartSound();
     game.start(PUYO_VERSUS_MODE);
     hud.hideOverlay();
+    matchmakingOverlay?.hide();
     hideMenuScreen();
     music.playGame();
   }

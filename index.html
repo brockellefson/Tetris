@@ -278,6 +278,31 @@
     </div>
   </div>
 
+  <!-- Matchmaking overlay (Puyo versus, network mode). Shown the
+       moment the player clicks VS NETWORK and stays up until either
+       a peer is found (auto-hide, match begins) or the player
+       cancels via the CANCEL button / Esc key. Sits above the splash
+       so the title text and CANCEL button are unambiguous. The
+       spinner is two concentric SVG circles — a dim track plus a
+       neon arc that rotates via CSS keyframes; rendering is GPU-
+       accelerated so it stays smooth even while supabase-js is
+       loading and chewing through the WebSocket handshake. -->
+  <div id="matchmaking-overlay" class="hidden">
+    <div class="matchmaking-card">
+      <h2 class="matchmaking-title">FINDING OPPONENT</h2>
+      <div class="matchmaking-spinner-wrap">
+        <svg class="matchmaking-spinner" viewBox="0 0 50 50" aria-hidden="true">
+          <circle class="matchmaking-spinner-track" cx="25" cy="25" r="20" />
+          <circle class="matchmaking-spinner-arc"   cx="25" cy="25" r="20" />
+        </svg>
+      </div>
+      <div class="matchmaking-status" id="matchmaking-status">SEARCHING THE LOBBY…</div>
+      <button id="matchmaking-cancel-btn" class="menu-btn menu-btn-secondary" type="button">
+        <span class="menu-btn-text">CANCEL</span>
+      </button>
+    </div>
+  </div>
+
   <!-- Match-end menu (Puyo versus). Shown when the local game ends
        OR when the opponent's 'i_lost' message lands. Two actions:
        REMATCH starts a fresh versus run on the same channel; EXIT

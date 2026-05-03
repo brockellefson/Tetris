@@ -42,7 +42,8 @@ Tetris/
     │   │                            inbound 'garbage' → dropNuisance.
     │   ├── state-sync-plugin.js   ← throttled board snapshots → 'state'.
     │   ├── opponent-view.js       ← paints incoming snapshots.
-    │   └── match-end-menu.js      ← REMATCH / EXIT modal.
+    │   ├── match-end-menu.js      ← REMATCH / EXIT modal.
+    │   └── matchmaking-overlay.js ← FINDING OPPONENT spinner + CANCEL.
     ├── menus/
     │   └── powerup.js  ← power-up + bundled-curse choice modal
     ├── powerups/

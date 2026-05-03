@@ -67,8 +67,9 @@ import specialsPlugin       from './specials/index.js';
 // then streams snapshots, garbage handles the chain protocol.
 import garbagePlugin          from './modes/puyo/versus/garbage-plugin.js';
 import stateSyncPlugin        from './modes/puyo/versus/state-sync-plugin.js';
-import { setupNetworkVersus } from './modes/puyo/versus/network-vs.js';
-import { setupMatchEndMenu }  from './modes/puyo/versus/match-end-menu.js';
+import { setupNetworkVersus }      from './modes/puyo/versus/network-vs.js';
+import { setupMatchEndMenu }       from './modes/puyo/versus/match-end-menu.js';
+import { setupMatchmakingOverlay } from './modes/puyo/versus/matchmaking-overlay.js';
 // Puyo card-pool plugins. Each card carries lifecycle hooks
 // (decoratePiece for Lucky Pair, modifyIncomingGarbage for
 // Shield + Thorns) so they need plugin registration. modes-gated
@@ -421,11 +422,13 @@ playPuyoBtn$.addEventListener('click', () => startRunInMode(PUYO_MODE));
 // click handler internally; we just hand it the engine-side
 // dependencies (game, hud, music, splash hide), the match-end
 // menu so it can show YOU WIN / YOU LOSE with REMATCH/EXIT
-// buttons, and returnToSplash so EXIT can tear down the run via
-// the same path the in-game MAIN MENU button uses. The button
-// auto-hides itself when no Supabase credentials are configured
-// (same gate the leaderboard button uses).
-const matchEndMenu = setupMatchEndMenu();
+// buttons, the matchmaking overlay (FINDING OPPONENT spinner +
+// CANCEL), and returnToSplash so EXIT can tear down the run via
+// the same path the in-game MAIN MENU button uses. The splash
+// button auto-hides itself when no Supabase credentials are
+// configured (same gate the leaderboard button uses).
+const matchEndMenu       = setupMatchEndMenu();
+const matchmakingOverlay = setupMatchmakingOverlay();
 setupNetworkVersus({
   game,
   hud,
@@ -434,6 +437,7 @@ setupNetworkVersus({
   playMenuStartSound,
   playMenuHoverSound,
   matchEndMenu,
+  matchmakingOverlay,
   returnToSplash,
 });
 

@@ -217,7 +217,12 @@ export default {
     s.outgoingThisChain = 0;
 
     if (_pendingIncoming > 0) {
-      dropNuisance(game, _pendingIncoming);
+      // Versus drops use randomized column order — see
+      // nuisance.js for why the SP curse keeps the deterministic
+      // sweep. Two same-sized garbage hits should LOOK different
+      // when they land, so opponents can't lean on left-edge
+      // muscle memory to set up counter-chains.
+      dropNuisance(game, _pendingIncoming, { randomize: true });
       _pendingIncoming = 0;
     }
     s.incoming = _pendingIncoming;
