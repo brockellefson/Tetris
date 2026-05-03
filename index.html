@@ -265,11 +265,28 @@
     </div>
   </div>
 
-  <!-- Background theme music. Loops forever once the game starts.
-       Browsers gate audio playback behind a user gesture, so we don't
-       call .play() until the player presses their first key (handled
-       in main.js via the onStart callback). -->
-  <audio id="theme-music" src="assets/theme.mp3" loop preload="auto"></audio>
+  <!-- ============================================================
+       Background music
+       ============================================================
+       Three tracks, owned by js/music.js (a tiny crossfading
+       controller wired up in main.js):
+         menu-music        plays on the splash screen, loops forever.
+         theme-music   ┐
+         theme-music-2 ┘   the two in-game tracks. The controller
+                           picks one at random on the first
+                           menu→game transition and listens for the
+                           track's `ended` event to roll the OTHER
+                           one in afterwards — alternating forever.
+                           NEITHER carries `loop`: with `loop`,
+                           `ended` never fires, which would silently
+                           pin the player to a single track for
+                           the entire run.
+       Browsers gate audio playback behind a user gesture, so the
+       menu track may stay silent until the first interaction —
+       music.js retries on the player's first input. -->
+  <audio id="menu-music"     src="assets/menu.mp3"   loop preload="auto"></audio>
+  <audio id="theme-music"    src="assets/theme.mp3"       preload="auto"></audio>
+  <audio id="theme-music-2"  src="assets/theme2.mp3"      preload="auto"></audio>
 
   <script type="module" src="js/main.js"></script>
 </body>

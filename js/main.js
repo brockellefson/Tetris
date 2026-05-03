@@ -34,6 +34,7 @@ import { setupHUD } from './hud.js';
 import { setupPowerupMenu } from './menus/powerup.js';
 import { setupDebug } from './debug.js';
 import { setupLeaderboard } from './leaderboard.js';
+import { setupMusic } from './music.js';
 // Lifecycle plugins — power-ups and curses that ship hooks (tick /
 // onSpawn / shouldDeferLock / freezesGameplay / interceptInput /
 // modifier hooks). Cards without hooks (Hold, Ghost, Psychic,
@@ -74,7 +75,9 @@ const nextCtxs     = nextCanvases.map(c => c.getContext('2d', { alpha: false }))
 const menuScreen$  = document.getElementById('menu-screen');
 const playBtn$     = document.getElementById('play-btn');
 const leaderboardBtn$ = document.getElementById('leaderboard-btn');
+const menuMusic$   = document.getElementById('menu-music');
 const themeMusic$  = document.getElementById('theme-music');
+const themeMusic2$ = document.getElementById('theme-music-2');
 
 // -------- Boot --------
 const game = new Game();
@@ -189,20 +192,23 @@ game.onSpecialDestroy = (_kind, cells, points) => {
 // the leaderboard existed.
 game.onGameOver = () => leaderboard.showSubmit();
 
-// -------- Background theme music --------
-// Plain <audio loop> handles the looping for us — we just drive
-// play / pause from the lifecycle callbacks. Browsers require a
-// user gesture before audio can start, so the first call happens
-// in onStart (triggered by the player's first key press).
-themeMusic$.volume = 0.5; // sit under SFX without drowning them
-function playTheme() {
-  // .play() returns a promise that rejects if the browser still
-  // refuses (e.g. the gesture didn't propagate). Swallow the
-  // rejection so it doesn't show up as an unhandled error.
-  const p = themeMusic$.play();
-  if (p && typeof p.catch === 'function') p.catch(() => {});
-}
-function pauseTheme() { themeMusic$.pause(); }
+// -------- Background music --------
+// Three tracks, all crossfading: menu.mp3 on the splash screen,
+// theme.mp3 / theme2.mp3 alternating during gameplay. The music
+// module owns the volume ramps, the random "first track" pick on
+// the menu→game transition, the `ended`-driven alternation, and
+// the autoplay-policy retry. main.js just calls playGame() / pause()
+// / resume() at the relevant lifecycle moments.
+//
+// kick() attempts an immediate menu fade-in and registers a one-
+// shot fallback for the first user interaction in case the browser
+// blocked the initial autoplay attempt. After that, the splash
+// just hums until the player commits to a button.
+const music = setupMusic({
+  menuEl:   menuMusic$,
+  themeEls: [themeMusic$, themeMusic2$],
+});
+music.kick();
 
 // Hide the splash screen the first time the game starts, and on
 // every restart afterwards (the menu is only meant for initial
@@ -215,7 +221,7 @@ setupInput(game, {
     hud.hideOverlay();
     powerupMenu.clear();
     hideMenuScreen();
-    playTheme();
+    music.playGame();
     // A fresh start hides any leftover debug surfaces (e.g. user
     // restarted with R while the menu was open).
     debug.hideMenu();
@@ -228,7 +234,7 @@ setupInput(game, {
   },
   onPause: () => {
     hud.showOverlay('PAUSED', 'PRESS P OR ESC TO RESUME');
-    pauseTheme();
+    music.pause();
     // Pause is the only state where the Debug button is reachable —
     // surfacing it elsewhere would let the player dump unlimited
     // charges into a live game.
@@ -236,7 +242,7 @@ setupInput(game, {
   },
   onResume: () => {
     hud.hideOverlay();
-    playTheme();
+    music.resume();
     debug.hideLauncher();
     debug.hideMenu();
   },
@@ -257,13 +263,16 @@ playBtn$.addEventListener('mouseenter', () => {
 playBtn$.addEventListener('click', () => {
   if (game.started) return;
   // Fire the start chime BEFORE game.start() so AudioContext unlock
-  // latency doesn't push it noticeably behind the theme.
+  // latency doesn't push it noticeably behind the theme. The
+  // music.playGame() call crossfades the splash menu track out
+  // and the in-game theme in over ~700 ms, so the chime fires on
+  // top of the hand-off rather than after a hard cut.
   playMenuStartSound();
   game.start();
   hud.hideOverlay();
   powerupMenu.clear();
   hideMenuScreen();
-  playTheme();
+  music.playGame();
 });
 
 // Splash-menu LEADERBOARD button. The button itself is hidden by
@@ -283,17 +292,127 @@ if (leaderboardBtn$) {
   });
 }
 
-// Keyboard parity with the click path — pressing Enter or Space
-// while the splash is up should also play the start chime, then
-// fall through to input.js's first-keypress handler which calls
-// game.start(). Capture phase so we run before input.js (which is
-// on document, bubble phase) — that way the chime is already
-// scheduled even though both handlers act on the same key event.
+// -------- Splash menu keyboard navigation --------
+// Arrow keys (and WASD) cycle between the visible splash buttons,
+// Enter/Space activates the focused one, and 1/2 jump to Play /
+// Leaderboard directly the way the power-up modal's number keys
+// work. Everything else is suppressed while the splash is up so
+// input.js's "any key starts the game" fallback can't bypass the
+// menu choice — the player has to commit to either Play or
+// Leaderboard.
+//
+// Runs in capture phase so we win the race against input.js's
+// document-level bubble handler.
+
+// Build the list of focusable splash buttons in display order.
+// Recomputed on every keydown because the Leaderboard button's
+// .hidden class is toggled by leaderboard.js at boot — and could
+// in principle change later if the config gets re-evaluated.
+function splashButtons() {
+  const list = [playBtn$];
+  if (leaderboardBtn$ && !leaderboardBtn$.classList.contains('hidden')) {
+    list.push(leaderboardBtn$);
+  }
+  return list;
+}
+
+// Tracked selection index. Survives blur events (clicking off the
+// page) so the next arrow press refocuses the same button.
+let splashSelected = 0;
+
+function focusSplashButton(idx, { silent = false } = {}) {
+  const buttons = splashButtons();
+  if (buttons.length === 0) return;
+  // Wrap so left-from-first lands on last and vice-versa, matching
+  // the powerup-menu's looping behavior.
+  const next = ((idx % buttons.length) + buttons.length) % buttons.length;
+  if (!silent && next !== splashSelected) playCycleSound();
+  splashSelected = next;
+  buttons[splashSelected].focus();
+}
+
+// Keep the internal pointer in sync with mouse hover so a hover-
+// then-arrow flow continues from the hovered button rather than
+// jumping back to wherever the keyboard last was.
+playBtn$.addEventListener('mouseenter', () => {
+  if (game.started) return;
+  splashSelected = 0;
+});
+if (leaderboardBtn$) {
+  leaderboardBtn$.addEventListener('mouseenter', () => {
+    if (game.started) return;
+    if (leaderboardBtn$.classList.contains('hidden')) return;
+    splashSelected = splashButtons().indexOf(leaderboardBtn$);
+  });
+}
+
+// Initial focus — the splash is the first thing on screen, so the
+// Play button should be ready to take an Enter the moment the page
+// finishes loading.
+focusSplashButton(0, { silent: true });
+
 document.addEventListener('keydown', (e) => {
   if (game.started) return;
   if (menuScreen$.classList.contains('hidden')) return;
-  if (e.key === 'Enter' || e.key === ' ') {
-    playMenuStartSound();
+  // Don't intercept while the leaderboard browse overlay is open
+  // over the splash — its own Esc handler owns keyboard input
+  // until it closes.
+  const browse$ = document.getElementById('leaderboard-browse');
+  if (browse$ && !browse$.classList.contains('hidden')) return;
+
+  // Pass-through for browser-reserved keys so Tab still moves
+  // native focus, F5 reloads, F12 opens devtools, etc. These are
+  // the same keys input.js's first-press fallback explicitly skips.
+  if (e.key === 'F5' || e.key === 'F12' || e.key === 'Tab') return;
+
+  const buttons = splashButtons();
+  if (buttons.length === 0) return;
+
+  // Number-key shortcuts — '1' = first button, '2' = second, etc.
+  // Mirrors the powerup-menu's 1/2/3 jump-to-card pattern.
+  const numIdx = ['1', '2', '3'].indexOf(e.key);
+  if (numIdx !== -1 && numIdx < buttons.length) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    focusSplashButton(numIdx);
+    buttons[numIdx].click();
+    return;
+  }
+
+  switch (e.key) {
+    case 'ArrowUp':
+    case 'ArrowLeft':
+    case 'w': case 'W':
+    case 'a': case 'A':
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      focusSplashButton(splashSelected - 1);
+      return;
+    case 'ArrowDown':
+    case 'ArrowRight':
+    case 's': case 'S':
+    case 'd': case 'D':
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      focusSplashButton(splashSelected + 1);
+      return;
+    case 'Enter':
+    case ' ':
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      // Activate via .click() so the existing button click handlers
+      // (which already play the right sound and run the right
+      // start/leaderboard path) own the actual work.
+      buttons[splashSelected].click();
+      return;
+    default:
+      // Suppress every other key so input.js's "any key starts
+      // the game" fallback can't fire while the splash is up. The
+      // player must commit to a button via Enter/Space (or a number
+      // key, or a click).
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
   }
 }, { capture: true });
 
