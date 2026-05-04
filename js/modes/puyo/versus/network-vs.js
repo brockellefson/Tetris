@@ -1,21 +1,22 @@
 // ============================================================
-// Network versus boot — Supabase Realtime random matchmaking
+// Network versus boot — SignalR random matchmaking
 // ============================================================
 //
 // Owns the "click VS NETWORK → matchmaking → handshake → match →
-// end" flow. Replaces the previous local-vs (BroadcastChannel) flow
-// — same lifecycle shape, different transport. main.js calls
-// setupNetworkVersus(...) once at boot; the function attaches the
-// click handler and manages everything from there.
+// end" flow. Originally rode Supabase Realtime; now points at a
+// self-hosted .NET SignalR service (../Matchmaking/src/Matchmaking.Server).
+// The lifecycle shape and message protocol are unchanged — this
+// file only cares about MatchController, not the underlying wire —
+// so the swap is a three-import diff plus the transport constructor.
 //
 // Lifecycle:
 //
-//   1. Splash button click → check Supabase config → open lobby
+//   1. Splash button click → check matchmaking config → open lobby
 //      via findMatch(). Show "FINDING OPPONENT…" overlay with a
 //      cancel hook (Esc / clicking the button again).
 //   2. Matchmaking resolves with { matchId, peerId } → build a
-//      SupabaseRealtimeTransport on `puyo-vs-match:<matchId>`,
-//      wrap in MatchController.
+//      SignalRMatchTransport against /hubs/match (server adds us to
+//      the match:<matchId> SignalR group), wrap in MatchController.
 //   3. Send a 'ready' message carrying our playerId + a fresh
 //      seedCandidate. On receiving the peer's 'ready', begin the
 //      match (game.start(PUYO_VERSUS_MODE)). Both peers seed the
@@ -25,15 +26,16 @@
 //   5. On 'i_lost' or synthetic 'peer_left' → paint match end.
 //      peer_left treats the disconnect as a win (the most-played
 //      Puyo arcade convention) and locks the rematch button.
-//   6. REMATCH stays on the same Realtime channel — exchange a
-//      fresh 'rematch_ready' with a new seedCandidate, restart
-//      when both sides are go. EXIT closes the channel and
-//      returns to the splash.
+//   6. REMATCH stays on the same SignalR group — exchange a fresh
+//      'rematch_ready' with a new seedCandidate, restart when both
+//      sides are go. EXIT closes the transport (drops the SignalR
+//      group membership) and returns to the splash.
 //
 // Architectural note: the body of this file is intentionally close
 // to local-vs.js — same flag set, same reconcilePostMatchState
 // logic, same chained onGameOver. The only differences are:
-//   • Transport construction is async (Supabase WebSocket subscribe).
+//   • Transport construction is async (SignalR WebSocket handshake +
+//     JoinMatch invocation).
 //   • A 'peer_left' synthetic event from the transport replaces
 //     the never-implemented "tab close detected" behavior the
 //     local version chose to skip.
@@ -43,9 +45,9 @@
 
 import { PUYO_VERSUS_MODE } from './mode.js';
 import { MatchController } from './match-controller.js';
-import { SupabaseRealtimeTransport } from './supabase-transport.js';
-import { findMatch } from './matchmaking.js';
-import { isVersusEnabled, getSupabaseClient } from './supabase-client.js';
+import { SignalRMatchTransport } from './signalr-transport.js';
+import { findMatch } from './signalr-matchmaking.js';
+import { isVersusEnabled, getSignalRConnection } from './signalr-client.js';
 import {
   attachMatchController,
   detachMatchController,
@@ -73,7 +75,7 @@ export function setupNetworkVersus({
   const playVsBtn$ = document.getElementById('play-versus-btn');
   if (!playVsBtn$) return;
 
-  // If the project has no Supabase credentials configured, the
+  // If the project has no MATCHMAKING_SERVICE_URL configured, the
   // VS NETWORK button has nowhere to dial. Hide it on boot the
   // same way the leaderboard button is gated — a fresh clone of
   // the repo with empty config.js never advertises features that
@@ -133,9 +135,9 @@ export function setupNetworkVersus({
     matchmakingOverlay?.show({ onCancel: cancelMatchmaking });
     matchmakingOverlay?.setStatus('SEARCHING THE LOBBY…');
 
-    // Pump live presence counts straight into the overlay so the
+    // Pump live lobby counts straight into the overlay so the
     // player sees "<n> PLAYERS ONLINE" tick up/down while they wait.
-    // Fires once per Realtime presence sync.
+    // Fires once per server LobbyCount fan-out (every join/leave).
     matchmakingHandle = findMatch({
       playerId: myId,
       onLobbyChange: ({ count }) => {
@@ -177,11 +179,12 @@ export function setupNetworkVersus({
     matchmakingOverlay?.setStatus('OPPONENT FOUND — CONNECTING…');
     matchmakingOverlay?.setOnlineCount(null);
 
-    // Build the per-match transport. We need the live Supabase
-    // client (already cached by getSupabaseClient on first call
-    // in matchmaking).
-    const client = await getSupabaseClient();
-    if (!client) {
+    // Build the per-match transport. signalr-client caches one
+    // HubConnection per hub path, so the lobby connection from
+    // findMatch() and this match connection are independent. The
+    // transport handles its own JoinMatch invocation in _start().
+    const conn = await getSignalRConnection('/hubs/match');
+    if (!conn) {
       matchmakingOverlay?.setStatus('CONNECTION FAILED', { warning: true });
       setTimeout(() => {
         if (!game.started) matchmakingOverlay?.hide();
@@ -189,11 +192,7 @@ export function setupNetworkVersus({
       return;
     }
 
-    const transport = new SupabaseRealtimeTransport(
-      client,
-      `puyo-vs-match:${matchId}`,
-      { selfId: myId, peerId },
-    );
+    const transport = new SignalRMatchTransport(conn, matchId, myId, peerId);
     matchController = new MatchController(transport);
 
     wireMatchHandlers();
@@ -219,8 +218,8 @@ export function setupNetworkVersus({
 
   // All match-channel subscriptions in one place. Identical wiring
   // to local-vs's; the only added handler is `peer_left` (synthetic,
-  // emitted by SupabaseRealtimeTransport when Realtime presence
-  // tells us our peer is gone).
+  // emitted by SignalRMatchTransport when the server's PeerLeft
+  // fan-out tells us our peer is gone).
   function wireMatchHandlers() {
     matchController.on('ready', (payload) => {
       if (!payload || payload.playerId === myId) return;
@@ -254,8 +253,9 @@ export function setupNetworkVersus({
       reconcilePostMatchState();
     });
 
-    // Synthetic from SupabaseRealtimeTransport — the peer's
-    // presence row vanished from Realtime. Treat as "they left."
+    // Synthetic from SignalRMatchTransport — the peer's connection
+    // vanished from the match group (server's OnDisconnectedAsync
+    // fired). Treat as "they left."
     // If we were mid-match, also treat it as a win for us so the
     // player isn't stranded waiting for an i_lost that's never
     // coming. Nothing to send back — the channel is dead on
@@ -339,7 +339,7 @@ export function setupNetworkVersus({
     // opponentLeft persists across rematch attempts — once they're
     // gone, they're gone — so DON'T reset it here. (local-vs reset
     // it because BroadcastChannel had no disconnect detection;
-    // Realtime presence does, so the flag has real meaning.)
+    // SignalR's OnDisconnectedAsync does, so the flag has real meaning.)
     matchEndMenu?.show(title, {
       onRematch: clickRematch,
       onExit:    clickExit,

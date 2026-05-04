@@ -6,15 +6,16 @@
 // and whichever transport actually moves bytes between players.
 // The transport is dependency-injected so we can:
 //
-//   • Use SupabaseRealtimeTransport for actual networked play
-//     (what's wired today via setupNetworkVersus).
+//   • Use SignalRMatchTransport for actual networked play (what's
+//     wired today via setupNetworkVersus, dialing the .NET
+//     Matchmaking.Server in the sibling repo).
 //   • Unit-test the protocol with a MockTransport that just relays
 //     to a paired peer in-memory (no browser, no network).
 //
 // An earlier iteration shipped a BroadcastChannelTransport for two-
 // tabs-on-one-machine fake versus; it lived here next to the
-// MatchController. Once the Supabase transport stabilized that
-// devtool earned its retirement — Realtime works fine for two
+// MatchController. Once the realtime transport stabilized that
+// devtool earned its retirement — SignalR works fine for two
 // browsers on the same laptop too. The architectural seam stayed:
 // any new transport just needs to implement { send, onMessage, close }.
 //
