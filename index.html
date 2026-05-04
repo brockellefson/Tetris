@@ -164,7 +164,7 @@
            gate the leaderboard button uses). js/modes/puyo/versus/
            network-vs.js owns the matchmaking + handshake. -->
       <button id="play-versus-btn" class="menu-btn menu-btn-secondary" type="button">
-        <span class="menu-btn-text">VS NETWORK</span>
+        <span class="menu-btn-text">VS</span>
       </button>
       <!-- Secondary action — opens the global leaderboard browse
            overlay. Hidden gracefully (via JS) when js/config.js has
@@ -297,6 +297,11 @@
         </svg>
       </div>
       <div class="matchmaking-status" id="matchmaking-status">SEARCHING THE LOBBY…</div>
+      <!-- Live count of players currently sitting in the matchmaking
+           lobby (including this tab). Populated by network-vs.js as
+           Realtime presence syncs fire; hidden once we've left the
+           lobby (paired or cancelled). -->
+      <div class="matchmaking-online hidden" id="matchmaking-online"></div>
       <button id="matchmaking-cancel-btn" class="menu-btn menu-btn-secondary" type="button">
         <span class="menu-btn-text">CANCEL</span>
       </button>

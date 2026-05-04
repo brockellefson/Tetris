@@ -99,6 +99,7 @@ const nextCtxs     = nextCanvases.map(c => c.getContext('2d', { alpha: false }))
 const menuScreen$  = document.getElementById('menu-screen');
 const playBtn$     = document.getElementById('play-btn');
 const playPuyoBtn$ = document.getElementById('play-puyo-btn');
+const playVersusBtn$ = document.getElementById('play-versus-btn');
 const leaderboardBtn$ = document.getElementById('leaderboard-btn');
 const mainMenuBtn$ = document.getElementById('main-menu-btn');
 const debugBtn$    = document.getElementById('debug-btn');
@@ -264,7 +265,7 @@ game.onGameOver = () => leaderboard.showSubmit();
 const music = setupMusic({
   menuEl:   menuMusic$,
   themeEls: [themeMusic$, themeMusic2$],
-  baseVolume: 0.25,
+  baseVolume: 0.1875,
 });
 music.kick();
 
@@ -472,11 +473,15 @@ if (leaderboardBtn$) {
 // document-level bubble handler.
 
 // Build the list of focusable splash buttons in display order.
-// Recomputed on every keydown because the Leaderboard button's
-// .hidden class is toggled by leaderboard.js at boot — and could
-// in principle change later if the config gets re-evaluated.
+// Recomputed on every keydown because the VS and Leaderboard buttons'
+// .hidden classes are toggled at boot (network-vs / leaderboard
+// modules gate them on Supabase config) — and could in principle
+// change later if the config gets re-evaluated.
 function splashButtons() {
   const list = [playBtn$, playPuyoBtn$];
+  if (playVersusBtn$ && !playVersusBtn$.classList.contains('hidden')) {
+    list.push(playVersusBtn$);
+  }
   if (leaderboardBtn$ && !leaderboardBtn$.classList.contains('hidden')) {
     list.push(leaderboardBtn$);
   }
@@ -509,6 +514,13 @@ playPuyoBtn$.addEventListener('mouseenter', () => {
   if (game.started) return;
   splashSelected = splashButtons().indexOf(playPuyoBtn$);
 });
+if (playVersusBtn$) {
+  playVersusBtn$.addEventListener('mouseenter', () => {
+    if (game.started) return;
+    if (playVersusBtn$.classList.contains('hidden')) return;
+    splashSelected = splashButtons().indexOf(playVersusBtn$);
+  });
+}
 if (leaderboardBtn$) {
   leaderboardBtn$.addEventListener('mouseenter', () => {
     if (game.started) return;
@@ -540,8 +552,10 @@ document.addEventListener('keydown', (e) => {
   if (buttons.length === 0) return;
 
   // Number-key shortcuts — '1' = first button, '2' = second, etc.
-  // Mirrors the powerup-menu's 1/2/3 jump-to-card pattern.
-  const numIdx = ['1', '2', '3'].indexOf(e.key);
+  // Mirrors the powerup-menu's 1/2/3 jump-to-card pattern. The list
+  // can be up to four buttons (Tetris, Puyo, VS, Leaderboard) when
+  // both Supabase-gated buttons are visible, so we cover '1'–'4'.
+  const numIdx = ['1', '2', '3', '4'].indexOf(e.key);
   if (numIdx !== -1 && numIdx < buttons.length) {
     e.preventDefault();
     e.stopImmediatePropagation();

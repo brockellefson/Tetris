@@ -23,6 +23,11 @@
 //                            went wrong" messages (e.g. CONNECTION
 //                            FAILED before the auto-clear timer
 //                            kicks in).
+//   setOnlineCount(n)     → show "<n> PLAYER(S) ONLINE" under the
+//                            status line. Pass null/undefined to
+//                            hide the line. Network-vs.js calls this
+//                            from the lobby's presence-sync hook so
+//                            the player can see the lobby is alive.
 // ============================================================
 
 import {
@@ -36,13 +41,15 @@ import {
 export function setupMatchmakingOverlay() {
   const overlay$ = document.getElementById('matchmaking-overlay');
   const status$  = document.getElementById('matchmaking-status');
+  const online$  = document.getElementById('matchmaking-online');
   const cancel$  = document.getElementById('matchmaking-cancel-btn');
   if (!overlay$ || !cancel$) {
     // Defensive — older index.html without the markup degrades to
     // a no-op overlay. The splash flow still works; it just won't
     // surface a visual cue while waiting.
     return {
-      show: () => {}, hide: () => {}, isOpen: () => false, setStatus: () => {},
+      show: () => {}, hide: () => {}, isOpen: () => false,
+      setStatus: () => {}, setOnlineCount: () => {},
     };
   }
 
@@ -61,6 +68,10 @@ export function setupMatchmakingOverlay() {
     // setStatus immediately after show() if they want a custom
     // first message (e.g. "RECONNECTING…").
     setStatus('SEARCHING THE LOBBY…');
+    // Clear any leftover count from a previous attempt — the lobby
+    // hasn't surfaced its first presence sync yet, so we shouldn't
+    // be displaying a stale "3 PLAYERS ONLINE" tag.
+    setOnlineCount(null);
     overlay$.classList.remove('hidden');
     playMenuOpenSound();
     // Focus CANCEL after a frame so the modal-open transition
@@ -72,12 +83,33 @@ export function setupMatchmakingOverlay() {
 
   function hide() {
     overlay$.classList.add('hidden');
+    // Drop the count line at the same time the overlay disappears
+    // so a re-open starts in the "no count yet" state. Stale counts
+    // from a previous matchmaking attempt would otherwise flash for
+    // a frame before the next presence sync arrived.
+    setOnlineCount(null);
   }
 
   function setStatus(text, { warning = false } = {}) {
     if (!status$) return;
     status$.textContent = text || '';
     status$.classList.toggle('warning', !!warning);
+  }
+
+  // Pass an integer (>=1) to display the count, or null/undefined
+  // to hide the line entirely (e.g. before the first presence sync,
+  // or after we've left the lobby). Singular/plural is handled here
+  // so callers don't have to think about it.
+  function setOnlineCount(n) {
+    if (!online$) return;
+    if (n == null || !Number.isFinite(n) || n < 1) {
+      online$.textContent = '';
+      online$.classList.add('hidden');
+      return;
+    }
+    const label = n === 1 ? 'PLAYER ONLINE' : 'PLAYERS ONLINE';
+    online$.textContent = `${n} ${label}`;
+    online$.classList.remove('hidden');
   }
 
   cancel$.addEventListener('click', () => {
@@ -128,5 +160,5 @@ export function setupMatchmakingOverlay() {
     }
   }, true);
 
-  return { show, hide, isOpen, setStatus };
+  return { show, hide, isOpen, setStatus, setOnlineCount };
 }

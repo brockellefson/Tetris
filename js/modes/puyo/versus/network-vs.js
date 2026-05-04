@@ -133,7 +133,15 @@ export function setupNetworkVersus({
     matchmakingOverlay?.show({ onCancel: cancelMatchmaking });
     matchmakingOverlay?.setStatus('SEARCHING THE LOBBY…');
 
-    matchmakingHandle = findMatch({ playerId: myId });
+    // Pump live presence counts straight into the overlay so the
+    // player sees "<n> PLAYERS ONLINE" tick up/down while they wait.
+    // Fires once per Realtime presence sync.
+    matchmakingHandle = findMatch({
+      playerId: myId,
+      onLobbyChange: ({ count }) => {
+        matchmakingOverlay?.setOnlineCount(count);
+      },
+    });
 
     let pairing;
     try {
@@ -163,8 +171,11 @@ export function setupNetworkVersus({
 
     // Found someone — flip the status to reflect what's happening
     // next so a player who's been staring at the spinner sees clear
-    // forward progress before the match actually starts.
+    // forward progress before the match actually starts. The lobby
+    // count is no longer meaningful (we've left the lobby), so drop
+    // it now instead of leaving a stale tag visible.
     matchmakingOverlay?.setStatus('OPPONENT FOUND — CONNECTING…');
+    matchmakingOverlay?.setOnlineCount(null);
 
     // Build the per-match transport. We need the live Supabase
     // client (already cached by getSupabaseClient on first call

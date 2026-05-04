@@ -1857,6 +1857,24 @@ canvas { display: block; }
   text-shadow: 0 0 8px var(--neon-pink);
 }
 
+/* Live "<n> PLAYERS ONLINE" tag rendered just under the status line.
+   Quieter than the status itself — same orbitron family but no glow
+   and a dimmer color, so it reads as ambient info ("the lobby is
+   alive") rather than competing with the primary status. Stays
+   hidden until the first presence sync arrives so we never flash a
+   blank "0 PLAYERS ONLINE" before the WebSocket connects. */
+.matchmaking-online {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: rgba(0, 245, 255, 0.55);
+  margin-top: -14px;
+  margin-bottom: 22px;
+}
+.matchmaking-online.hidden { display: none; }
+
 /* CANCEL button overrides .menu-btn-secondary's default 100% width
    only by virtue of sitting in a narrower card; no extra rules
    needed. The button reuses the synthwave secondary palette so it

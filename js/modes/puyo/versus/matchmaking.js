@@ -63,13 +63,20 @@ function makeMatchId() {
 // forever waiting for a peer, which is fine for tests but
 // definitely not what the splash flow wants.
 //
+// `onLobbyChange` is an optional callback fired every time the
+// lobby's presence membership changes. Receives `{ count }`, where
+// `count` is the number of distinct players in the lobby right now
+// (always includes us once our `track` lands). The matchmaking
+// overlay uses it to render a "<n> PLAYERS ONLINE" tag so the player
+// can see the lobby is alive while they wait.
+//
 // Returns:
 //   { promise, cancel }
 //
 // promise — Promise<{ matchId, peerId }> resolved on pairing.
 // cancel  — Function. Calling it removes us from the lobby and
 //           causes the promise to reject.
-export function findMatch({ playerId } = {}) {
+export function findMatch({ playerId, onLobbyChange } = {}) {
   if (!playerId) throw new Error('findMatch requires playerId');
 
   let resolved = false;
@@ -131,6 +138,11 @@ export function findMatch({ playerId } = {}) {
       // Multiple entries per key are possible if the same playerId
       // appears in multiple tabs — we just take the keys.
       const peers = Object.keys(state).sort();
+      // Surface the live count to the UI BEFORE the pairing check
+      // so even a 1-person lobby (just us) renders "1 PLAYER ONLINE"
+      // instead of staying blank until someone else shows up. Errors
+      // from the consumer can't be allowed to break matchmaking.
+      try { onLobbyChange?.({ count: peers.length }); } catch { /* ignore */ }
       if (peers.length < 2) return;
       // Find our index in the sorted list and pair with our
       // immediate neighbor — but only if WE are the lower of the
