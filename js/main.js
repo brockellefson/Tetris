@@ -264,6 +264,7 @@ game.onGameOver = () => leaderboard.showSubmit();
 const music = setupMusic({
   menuEl:   menuMusic$,
   themeEls: [themeMusic$, themeMusic2$],
+  baseVolume: 0.25,
 });
 music.kick();
 
